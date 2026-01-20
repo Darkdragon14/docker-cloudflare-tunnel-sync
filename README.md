@@ -11,9 +11,9 @@ Go provides a stable Docker SDK, strong concurrency primitives for controller lo
 The project follows a controller pattern with clear separation of concerns:
 
 - **Docker adapter**: read-only access to running containers and labels.
-- **Label parser**: validates Cloudflare-specific labels and produces desired ingress rules.
-- **Cloudflare API client**: reads and updates tunnel configurations (ingress rules).
-- **Reconciliation engine**: compares desired vs actual state and applies changes deterministically.
+- **Label parser**: validates Cloudflare-specific labels and produces desired ingress and Access definitions.
+- **Cloudflare API client**: reads and updates tunnel configurations plus Access apps/policies.
+- **Reconciliation engines**: compare desired vs actual state for ingress and Access.
 - **Controller loop**: polls Docker at a fixed interval and triggers reconciliation.
 
 ## Project structure
@@ -44,7 +44,7 @@ internal/reconcile/
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `CF_API_TOKEN` | yes | - | Cloudflare API token with `Cloudflare Tunnel:Edit` permission. |
+| `CF_API_TOKEN` | yes | - | Cloudflare API token with `Cloudflare Tunnel:Edit` (and `Access:Apps and Policies:Edit` if using Access labels). |
 | `CF_ACCOUNT_ID` | yes | - | Cloudflare account identifier. |
 | `CF_TUNNEL_ID` | yes | - | Cloudflare Tunnel identifier. |
 | `CF_API_BASE_URL` | no | `https://api.cloudflare.com/client/v4` | Override Cloudflare API base URL. |
@@ -54,6 +54,7 @@ internal/reconcile/
 | `SYNC_RUN_ONCE` | no | `false` | Run a single reconciliation and exit. |
 | `SYNC_DRY_RUN` | no | `false` | Log changes without applying them. |
 | `SYNC_MANAGED_TUNNEL` | no | `false` | Allow this tool to overwrite the tunnel ingress configuration. |
+| `SYNC_MANAGED_ACCESS` | no | `false` | Allow this tool to create/update Access apps and policies. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 
 ## Usage
@@ -72,6 +73,7 @@ docker run --rm \
   -e CF_ACCOUNT_ID=your-account-id \
   -e CF_TUNNEL_ID=your-tunnel-id \
   -e SYNC_MANAGED_TUNNEL=true \
+  -e SYNC_MANAGED_ACCESS=true \
   -e SYNC_POLL_INTERVAL=30s \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   docker-cloudflare-tunnel-sync:local
@@ -88,6 +90,7 @@ services:
       CF_ACCOUNT_ID: your-account-id
       CF_TUNNEL_ID: your-tunnel-id
       SYNC_MANAGED_TUNNEL: "true"
+      SYNC_MANAGED_ACCESS: "true"
       SYNC_POLL_INTERVAL: 30s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -107,6 +110,7 @@ services:
 3. **Create an API token**
    - Cloudflare dashboard → My Profile → API Tokens → Create Token
    - Minimum permission: `Account` → `Cloudflare Tunnel` → `Edit`
+   - If using Access labels: add `Account` → `Access Apps and Policies` → `Edit`
 
 If you already run a `cloudflared` container, the credentials file is typically mounted under `/etc/cloudflared/<tunnel-id>.json` (or the path you configured). Use the `tunnel_id` and `account_tag` fields from that file to set `CF_TUNNEL_ID` and `CF_ACCOUNT_ID`.
 
@@ -121,20 +125,41 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 | `cloudflare.tunnel.service` | yes | `http://api:8080` | Cloudflare service/origin URL. |
 | `cloudflare.tunnel.path` | no | `/api` | Optional path prefix (must start with `/`). |
 
+## Access labels
+
+Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails and IPs. If only `policy.N.id` is provided, the policy is referenced without updates.
+
+| Label | Required | Example | Description |
+| --- | --- | --- | --- |
+| `cloudflare.access.enable` | yes | `true` | Opt-in flag for Access management. |
+| `cloudflare.access.app.name` | yes | `nginx` | Access application name. |
+| `cloudflare.access.app.domain` | yes | `nginx.example.com` | Access application domain. |
+| `cloudflare.access.app.id` | no | `app-uuid` | Optional existing app ID to update. |
+| `cloudflare.access.policy.1.name` | yes* | `allow-team` | Policy name (required unless using ID-only mode). |
+| `cloudflare.access.policy.1.action` | yes* | `allow` | Policy action (`allow` or `deny`, required unless using ID-only mode). |
+| `cloudflare.access.policy.1.include.emails` | no | `me@example.com` | Comma-separated allowed emails. |
+| `cloudflare.access.policy.1.include.ips` | no | `192.0.2.0/24` | Comma-separated allowed IPs/CIDRs. |
+| `cloudflare.access.policy.1.id` | no | `policy-uuid` | Optional existing policy ID. If set without other policy fields, the policy is referenced only and not updated. |
+
+When no app or policy ID is provided, the controller matches existing resources by name (and domain for apps). If multiple matches exist, reconciliation is skipped with a warning. If a policy ID is provided but not found in account-level policies, the controller will still attach the ID (useful for app-scoped policies).
+
 ## Reconciliation behavior
 
 - Docker labels define the desired ingress state; there are no service configuration files.
 - The controller reconciles the tunnel ingress list via the `/configurations` endpoint and appends a `http_status:404` fallback rule.
-- When `SYNC_MANAGED_TUNNEL=true`, the ingress list is fully managed and any non-labeled rules are removed.
+- When `SYNC_MANAGED_TUNNEL=true`, the ingress list is fully managed and any non-labeled rules are removed (warning: existing tunnel rules will be deleted).
 - When the flag is `false`, differences are logged and skipped.
+- Access apps/policies are reconciled when `SYNC_MANAGED_ACCESS=true` and are matched by ID or by name+domain; policy includes support emails and IPs only, and ID-only policies are never updated.
+- Access apps tagged with `managed-by=docker-cf-tunnel-sync` are deleted when no longer defined by labels; Access policies are not deleted automatically.
 - Duplicate hostname/path definitions are rejected to keep outcomes deterministic.
 - All operations are idempotent and safe to run continuously.
 
 ## Security and safety
 
 - Mount the Docker socket read-only (`/var/run/docker.sock:/var/run/docker.sock:ro`).
-- Scope the Cloudflare API token to `Cloudflare Tunnel:Edit`.
+- Scope the Cloudflare API token to `Cloudflare Tunnel:Edit` and `Access Apps and Policies:Edit` if using Access labels.
 - Require `SYNC_MANAGED_TUNNEL=true` to allow ingress updates; otherwise the controller is read-only.
+- Require `SYNC_MANAGED_ACCESS=true` to allow Access app/policy updates.
 
 ## Next steps
 

@@ -9,6 +9,7 @@ import (
 
 	"log/slog"
 
+	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/access"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/cloudflare"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/config"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/controller"
@@ -41,7 +42,8 @@ func main() {
 
 	parser := labels.NewParser()
 	reconciler := reconcile.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageTunnel)
-	controller := controller.NewController(dockerAdapter, parser, reconciler, cfg.Controller.PollInterval, logger)
+	accessEngine := access.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageAccess)
+	controller := controller.NewController(dockerAdapter, parser, reconciler, accessEngine, cfg.Controller.PollInterval, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

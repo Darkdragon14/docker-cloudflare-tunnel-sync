@@ -16,6 +16,13 @@ const (
 	LabelHost    = LabelPrefix + "hostname"
 	LabelPath    = LabelPrefix + "path"
 	LabelService = LabelPrefix + "service"
+
+	AccessLabelPrefix       = "cloudflare.access."
+	AccessLabelEnable       = AccessLabelPrefix + "enable"
+	AccessLabelAppName      = AccessLabelPrefix + "app.name"
+	AccessLabelAppDomain    = AccessLabelPrefix + "app.domain"
+	AccessLabelAppID        = AccessLabelPrefix + "app.id"
+	AccessLabelPolicyPrefix = AccessLabelPrefix + "policy."
 )
 
 // Parser converts Docker labels into desired Cloudflare ingress rules.
@@ -25,7 +32,7 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-// ParseContainers returns desired routes and any validation errors.
+// ParseContainers returns desired tunnel ingress rules and any validation errors.
 func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]model.RouteSpec, []error) {
 	errors := []error{}
 	desired := make(map[model.RouteKey]model.RouteSpec)
@@ -90,4 +97,200 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 	})
 
 	return result, errors
+}
+
+// ParseAccessContainers returns desired Access apps and any validation errors.
+func (parser *Parser) ParseAccessContainers(containers []docker.ContainerInfo) ([]model.AccessAppSpec, []error) {
+	errors := []error{}
+	desired := make(map[accessAppKey]model.AccessAppSpec)
+
+	sorted := make([]docker.ContainerInfo, len(containers))
+	copy(sorted, containers)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].ID < sorted[j].ID
+	})
+
+	for _, container := range sorted {
+		enabledValue, hasEnable := container.Labels[AccessLabelEnable]
+		if !hasEnable {
+			continue
+		}
+		enabled, err := strconv.ParseBool(enabledValue)
+		if err != nil || !enabled {
+			if err != nil {
+				errors = append(errors, fmt.Errorf("container %s: invalid %s label: %w", container.Name, AccessLabelEnable, err))
+			}
+			continue
+		}
+
+		appName := strings.TrimSpace(container.Labels[AccessLabelAppName])
+		appDomain := strings.TrimSpace(container.Labels[AccessLabelAppDomain])
+		appID := strings.TrimSpace(container.Labels[AccessLabelAppID])
+
+		if appName == "" {
+			errors = append(errors, fmt.Errorf("container %s: missing required %s label", container.Name, AccessLabelAppName))
+			continue
+		}
+		if appDomain == "" {
+			errors = append(errors, fmt.Errorf("container %s: missing required %s label", container.Name, AccessLabelAppDomain))
+			continue
+		}
+
+		policies, policyErrors := parseAccessPolicies(container)
+		errors = append(errors, policyErrors...)
+		if len(policies) == 0 {
+			errors = append(errors, fmt.Errorf("container %s: no access policies configured", container.Name))
+			continue
+		}
+
+		key := accessAppKey{Name: appName, Domain: appDomain}
+		if _, exists := desired[key]; exists {
+			errors = append(errors, fmt.Errorf("duplicate access app definition for %s", key.String()))
+			continue
+		}
+
+		source := model.SourceRef{ContainerID: container.ID, ContainerName: container.Name}
+		desired[key] = model.AccessAppSpec{
+			ID:       appID,
+			Name:     appName,
+			Domain:   appDomain,
+			Policies: policies,
+			Source:   source,
+		}
+	}
+
+	result := make([]model.AccessAppSpec, 0, len(desired))
+	for _, app := range desired {
+		result = append(result, app)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return accessAppKey{Name: result[i].Name, Domain: result[i].Domain}.String() < accessAppKey{Name: result[j].Name, Domain: result[j].Domain}.String()
+	})
+
+	return result, errors
+}
+
+type accessAppKey struct {
+	Name   string
+	Domain string
+}
+
+func (key accessAppKey) String() string {
+	return fmt.Sprintf("%s@%s", key.Name, key.Domain)
+}
+
+type accessPolicyBuilder struct {
+	ID            string
+	Name          string
+	Action        string
+	IncludeEmails []string
+	IncludeIPs    []string
+}
+
+func parseAccessPolicies(container docker.ContainerInfo) ([]model.AccessPolicySpec, []error) {
+	policies := map[int]*accessPolicyBuilder{}
+	errors := []error{}
+
+	for labelKey, value := range container.Labels {
+		if !strings.HasPrefix(labelKey, AccessLabelPolicyPrefix) {
+			continue
+		}
+		remainder := strings.TrimPrefix(labelKey, AccessLabelPolicyPrefix)
+		parts := strings.Split(remainder, ".")
+		if len(parts) < 2 {
+			errors = append(errors, fmt.Errorf("container %s: invalid access policy label %s", container.Name, labelKey))
+			continue
+		}
+
+		index, err := strconv.Atoi(parts[0])
+		if err != nil || index < 1 {
+			errors = append(errors, fmt.Errorf("container %s: invalid access policy index in %s", container.Name, labelKey))
+			continue
+		}
+		field := strings.Join(parts[1:], ".")
+		builder := policies[index]
+		if builder == nil {
+			builder = &accessPolicyBuilder{}
+			policies[index] = builder
+		}
+
+		trimmed := strings.TrimSpace(value)
+		switch field {
+		case "name":
+			builder.Name = trimmed
+		case "action":
+			builder.Action = strings.ToLower(trimmed)
+		case "id":
+			builder.ID = trimmed
+		case "include.emails":
+			builder.IncludeEmails = splitCommaList(trimmed)
+		case "include.ips":
+			builder.IncludeIPs = splitCommaList(trimmed)
+		default:
+			errors = append(errors, fmt.Errorf("container %s: unknown access policy label %s", container.Name, labelKey))
+		}
+	}
+
+	indexes := make([]int, 0, len(policies))
+	for index := range policies {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	result := make([]model.AccessPolicySpec, 0, len(indexes))
+	for _, index := range indexes {
+		policy := policies[index]
+		managed := true
+		if policy.ID != "" && policy.Name == "" && policy.Action == "" && len(policy.IncludeEmails) == 0 && len(policy.IncludeIPs) == 0 {
+			managed = false
+		}
+		if managed {
+			if policy.Name == "" {
+				errors = append(errors, fmt.Errorf("container %s: access policy %d missing name", container.Name, index))
+				continue
+			}
+			switch policy.Action {
+			case "allow", "deny":
+				// valid
+			case "":
+				errors = append(errors, fmt.Errorf("container %s: access policy %d missing action", container.Name, index))
+				continue
+			default:
+				errors = append(errors, fmt.Errorf("container %s: access policy %d has invalid action %q", container.Name, index, policy.Action))
+				continue
+			}
+			if len(policy.IncludeEmails) == 0 && len(policy.IncludeIPs) == 0 {
+				errors = append(errors, fmt.Errorf("container %s: access policy %d has no include rules", container.Name, index))
+				continue
+			}
+		}
+
+		result = append(result, model.AccessPolicySpec{
+			ID:            policy.ID,
+			Name:          policy.Name,
+			Action:        policy.Action,
+			IncludeEmails: policy.IncludeEmails,
+			IncludeIPs:    policy.IncludeIPs,
+			Managed:       managed,
+		})
+	}
+
+	return result, errors
+}
+
+func splitCommaList(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
 }

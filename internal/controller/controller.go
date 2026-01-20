@@ -6,27 +6,30 @@ import (
 
 	"log/slog"
 
+	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/access"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/docker"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/labels"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/reconcile"
 )
 
-// Controller polls Docker and reconciles Cloudflare ingress rules.
+// Controller polls Docker and reconciles Cloudflare ingress rules and Access apps.
 type Controller struct {
-	docker     *docker.Adapter
-	parser     *labels.Parser
-	reconciler *reconcile.Engine
-	interval   time.Duration
-	log        *slog.Logger
+	docker       *docker.Adapter
+	parser       *labels.Parser
+	reconciler   *reconcile.Engine
+	accessEngine *access.Engine
+	interval     time.Duration
+	log          *slog.Logger
 }
 
-func NewController(dockerAdapter *docker.Adapter, parser *labels.Parser, reconciler *reconcile.Engine, interval time.Duration, logger *slog.Logger) *Controller {
+func NewController(dockerAdapter *docker.Adapter, parser *labels.Parser, reconciler *reconcile.Engine, accessEngine *access.Engine, interval time.Duration, logger *slog.Logger) *Controller {
 	return &Controller{
-		docker:     dockerAdapter,
-		parser:     parser,
-		reconciler: reconciler,
-		interval:   interval,
-		log:        logger,
+		docker:       dockerAdapter,
+		parser:       parser,
+		reconciler:   reconciler,
+		accessEngine: accessEngine,
+		interval:     interval,
+		log:          logger,
 	}
 }
 
@@ -64,5 +67,18 @@ func (controller *Controller) syncOnce(ctx context.Context) error {
 		controller.log.Warn("label parsing error", "error", parseErr)
 	}
 
-	return controller.reconciler.Reconcile(ctx, desiredRoutes)
+	if err := controller.reconciler.Reconcile(ctx, desiredRoutes); err != nil {
+		return err
+	}
+
+	if controller.accessEngine == nil {
+		return nil
+	}
+
+	accessApps, accessErrors := controller.parser.ParseAccessContainers(containers)
+	for _, parseErr := range accessErrors {
+		controller.log.Warn("access label parsing error", "error", parseErr)
+	}
+
+	return controller.accessEngine.Reconcile(ctx, accessApps)
 }
