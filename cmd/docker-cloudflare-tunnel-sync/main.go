@@ -13,6 +13,7 @@ import (
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/cloudflare"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/config"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/controller"
+	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/dns"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/docker"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/labels"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/reconcile"
@@ -42,8 +43,9 @@ func main() {
 
 	parser := labels.NewParser()
 	reconciler := reconcile.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageTunnel)
+	dnsEngine := dns.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageDNS, cfg.Cloudflare.TunnelID)
 	accessEngine := access.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageAccess)
-	controller := controller.NewController(dockerAdapter, parser, reconciler, accessEngine, cfg.Controller.PollInterval, logger)
+	controller := controller.NewController(dockerAdapter, parser, reconciler, dnsEngine, accessEngine, cfg.Controller.PollInterval, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

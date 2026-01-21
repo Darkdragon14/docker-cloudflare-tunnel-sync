@@ -35,6 +35,7 @@ type ControllerConfig struct {
 	DryRun       bool
 	ManageTunnel bool
 	ManageAccess bool
+	ManageDNS    bool
 }
 
 // Load parses configuration from environment variables.
@@ -58,6 +59,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	manageAccess, err := parseBoolEnv("SYNC_MANAGED_ACCESS", false)
+	if err != nil {
+		return Config{}, err
+	}
+	manageDNS, err := parseBoolEnv("SYNC_MANAGED_DNS", false)
 	if err != nil {
 		return Config{}, err
 	}
@@ -97,6 +102,7 @@ func Load() (Config, error) {
 			DryRun:       dryRun,
 			ManageTunnel: manageTunnel,
 			ManageAccess: manageAccess,
+			ManageDNS:    manageDNS,
 		},
 		LogLevel: logLevel,
 	}, nil

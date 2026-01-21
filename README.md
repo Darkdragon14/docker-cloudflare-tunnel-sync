@@ -12,8 +12,8 @@ The project follows a controller pattern with clear separation of concerns:
 
 - **Docker adapter**: read-only access to running containers and labels.
 - **Label parser**: validates Cloudflare-specific labels and produces desired ingress and Access definitions.
-- **Cloudflare API client**: reads and updates tunnel configurations plus Access apps/policies.
-- **Reconciliation engines**: compare desired vs actual state for ingress and Access.
+- **Cloudflare API client**: reads and updates tunnel configurations plus Access apps/policies and DNS records.
+- **Reconciliation engines**: compare desired vs actual state for ingress, Access, and DNS.
 - **Controller loop**: polls Docker at a fixed interval and triggers reconciliation.
 
 ## Project structure
@@ -28,13 +28,17 @@ internal/config/
   config.go
 internal/controller/
   controller.go
+internal/dns/
+  engine.go
 internal/docker/
   adapter.go
   types.go
 internal/labels/
   parser.go
 internal/model/
+  access.go
   managed.go
+  ownership.go
   route.go
 internal/reconcile/
   engine.go
@@ -44,7 +48,7 @@ internal/reconcile/
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `CF_API_TOKEN` | yes | - | Cloudflare API token with `Cloudflare Tunnel:Edit` (and `Access:Apps and Policies:Edit` if using Access labels). |
+| `CF_API_TOKEN` | yes | - | Cloudflare API token with Account permissions (`Cloudflare Tunnel:Edit`, plus `Access Apps and Policies:Edit` for Access labels) and Zone permissions (`Zone:Read` + `DNS:Edit` for DNS automation). |
 | `CF_ACCOUNT_ID` | yes | - | Cloudflare account identifier. |
 | `CF_TUNNEL_ID` | yes | - | Cloudflare Tunnel identifier. |
 | `CF_API_BASE_URL` | no | `https://api.cloudflare.com/client/v4` | Override Cloudflare API base URL. |
@@ -55,6 +59,7 @@ internal/reconcile/
 | `SYNC_DRY_RUN` | no | `false` | Log changes without applying them. |
 | `SYNC_MANAGED_TUNNEL` | no | `false` | Allow this tool to overwrite the tunnel ingress configuration. |
 | `SYNC_MANAGED_ACCESS` | no | `false` | Allow this tool to create/update Access apps and policies. |
+| `SYNC_MANAGED_DNS` | no | `false` | Allow this tool to create/update DNS CNAME records for tunnel hostnames. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 
 ## Usage
@@ -80,6 +85,7 @@ docker run --rm \
   -e CF_TUNNEL_ID=your-tunnel-id \
   -e SYNC_MANAGED_TUNNEL=true \
   -e SYNC_MANAGED_ACCESS=true \
+  -e SYNC_MANAGED_DNS=true \
   -e SYNC_POLL_INTERVAL=30s \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   docker-cloudflare-tunnel-sync:local
@@ -97,6 +103,7 @@ services:
       CF_TUNNEL_ID: your-tunnel-id
       SYNC_MANAGED_TUNNEL: "true"
       SYNC_MANAGED_ACCESS: "true"
+      SYNC_MANAGED_DNS: "true"
       SYNC_POLL_INTERVAL: 30s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -115,10 +122,16 @@ services:
    - Or read it from the tunnel credentials JSON (`account_tag` field).
 3. **Create an API token**
    - Cloudflare dashboard → My Profile → API Tokens → Create Token
-   - Minimum permission: `Account` → `Cloudflare Tunnel` → `Edit`
-   - If using Access labels: add `Account` → `Access Apps and Policies` → `Edit`
+   - Account permissions:
+     - `Cloudflare Tunnel` → `Edit`
+     - `Access Apps and Policies` → `Edit` (if using Access labels)
+   - Zone permissions (only for DNS automation):
+     - `Zone` → `Read`
+     - `DNS` → `Edit`
 
 If you already run a `cloudflared` container, the credentials file is typically mounted under `/etc/cloudflared/<tunnel-id>.json` (or the path you configured). Use the `tunnel_id` and `account_tag` fields from that file to set `CF_TUNNEL_ID` and `CF_ACCOUNT_ID`.
+
+When DNS automation is enabled, the controller selects the zone by the longest matching suffix and creates CNAME records for each hostname.
 
 ## Docker labels
 
@@ -157,6 +170,7 @@ When no app or policy ID is provided, the controller matches existing resources 
 - When the flag is `false`, differences are logged and skipped.
 - Access apps/policies are reconciled when `SYNC_MANAGED_ACCESS=true` and are matched by ID or by name+domain; policy includes support emails and IPs only, and ID-only policies are never updated.
 - Access apps tagged with `managed-by=docker-cf-tunnel-sync` are deleted when no longer defined by labels; Access policies are not deleted automatically.
+- DNS records are created/updated when `SYNC_MANAGED_DNS=true` by matching the longest zone suffix; records are CNAMEs to `<tunnel-id>.cfargotunnel.com`, proxied, and only updated when already managed (comment `managed-by=docker-cf-tunnel-sync`) or already pointing to the tunnel.
 - Duplicate hostname/path definitions are rejected to keep outcomes deterministic.
 - All operations are idempotent and safe to run continuously.
 
@@ -166,6 +180,7 @@ When no app or policy ID is provided, the controller matches existing resources 
 - Scope the Cloudflare API token to `Cloudflare Tunnel:Edit` and `Access Apps and Policies:Edit` if using Access labels.
 - Require `SYNC_MANAGED_TUNNEL=true` to allow ingress updates; otherwise the controller is read-only.
 - Require `SYNC_MANAGED_ACCESS=true` to allow Access app/policy updates.
+- Require `SYNC_MANAGED_DNS=true` to allow DNS record updates.
 
 ## Next steps
 

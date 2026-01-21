@@ -1,8 +1,5 @@
 package model
 
-// AccessManagedTag marks Access applications managed by this tool.
-const AccessManagedTag = "managed-by=docker-cf-tunnel-sync"
-
 // AccessAppSpec describes the desired Access application state.
 type AccessAppSpec struct {
 	ID       string

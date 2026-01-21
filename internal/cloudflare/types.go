@@ -83,3 +83,38 @@ type AccessAPI interface {
 	UpdateAccessPolicy(ctx context.Context, id string, input AccessPolicyInput) (AccessPolicyRecord, error)
 	EnsureAccessTag(ctx context.Context, name string) error
 }
+
+// Zone describes a Cloudflare DNS zone.
+type Zone struct {
+	ID   string
+	Name string
+}
+
+// DNSRecord describes a DNS record in Cloudflare.
+type DNSRecord struct {
+	ID      string
+	Type    string
+	Name    string
+	Content string
+	Proxied bool
+	Comment string
+	TTL     int
+}
+
+// DNSRecordInput describes a DNS record to create or update.
+type DNSRecordInput struct {
+	Type    string
+	Name    string
+	Content string
+	Proxied bool
+	TTL     int
+	Comment string
+}
+
+// DNSAPI defines the Cloudflare operations used for DNS reconciliation.
+type DNSAPI interface {
+	ListZones(ctx context.Context) ([]Zone, error)
+	ListDNSRecords(ctx context.Context, zoneID string, recordType string, name string) ([]DNSRecord, error)
+	CreateDNSRecord(ctx context.Context, zoneID string, input DNSRecordInput) (DNSRecord, error)
+	UpdateDNSRecord(ctx context.Context, zoneID string, recordID string, input DNSRecordInput) (DNSRecord, error)
+}

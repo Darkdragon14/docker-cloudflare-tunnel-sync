@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -382,6 +383,147 @@ func (client *Client) writeAccessPolicy(ctx context.Context, method string, endp
 	}, nil
 }
 
+// ListZones returns all DNS zones for the account.
+func (client *Client) ListZones(ctx context.Context) ([]Zone, error) {
+	zones := []Zone{}
+	page := 1
+
+	for {
+		endpoint := client.zonesBase()
+		query := endpoint.Query()
+		query.Set("account.id", client.accountID)
+		query.Set("per_page", "50")
+		query.Set("page", strconv.Itoa(page))
+		endpoint.RawQuery = query.Encode()
+
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		client.addHeaders(request)
+
+		var response apiResponseWithInfo[[]zonePayload]
+		if err := client.do(request, &response); err != nil {
+			return nil, err
+		}
+		if err := response.Err(); err != nil {
+			return nil, err
+		}
+		for _, zone := range response.Result {
+			zones = append(zones, Zone{ID: zone.ID, Name: zone.Name})
+		}
+		if response.ResultInfo.TotalPages == 0 || page >= response.ResultInfo.TotalPages {
+			break
+		}
+		page++
+	}
+
+	return zones, nil
+}
+
+// ListDNSRecords returns DNS records for a zone by name and type.
+func (client *Client) ListDNSRecords(ctx context.Context, zoneID string, recordType string, name string) ([]DNSRecord, error) {
+	endpoint := client.dnsRecordsBase(zoneID)
+	query := endpoint.Query()
+	if recordType != "" {
+		query.Set("type", recordType)
+	}
+	if name != "" {
+		query.Set("name", name)
+	}
+	query.Set("per_page", "100")
+	endpoint.RawQuery = query.Encode()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	client.addHeaders(request)
+
+	var response apiResponseWithInfo[[]dnsRecordPayload]
+	if err := client.do(request, &response); err != nil {
+		return nil, err
+	}
+	if err := response.Err(); err != nil {
+		return nil, err
+	}
+
+	records := make([]DNSRecord, 0, len(response.Result))
+	for _, record := range response.Result {
+		records = append(records, DNSRecord{
+			ID:      record.ID,
+			Type:    record.Type,
+			Name:    record.Name,
+			Content: record.Content,
+			Proxied: record.Proxied,
+			Comment: record.Comment,
+			TTL:     record.TTL,
+		})
+	}
+
+	return records, nil
+}
+
+// CreateDNSRecord creates a DNS record in the given zone.
+func (client *Client) CreateDNSRecord(ctx context.Context, zoneID string, input DNSRecordInput) (DNSRecord, error) {
+	payload := dnsRecordWritePayload{
+		Type:    input.Type,
+		Name:    input.Name,
+		Content: input.Content,
+		Proxied: input.Proxied,
+		TTL:     input.TTL,
+		Comment: input.Comment,
+	}
+	return client.writeDNSRecord(ctx, http.MethodPost, client.dnsRecordsBase(zoneID), payload)
+}
+
+// UpdateDNSRecord updates a DNS record in the given zone.
+func (client *Client) UpdateDNSRecord(ctx context.Context, zoneID string, recordID string, input DNSRecordInput) (DNSRecord, error) {
+	payload := dnsRecordWritePayload{
+		Type:    input.Type,
+		Name:    input.Name,
+		Content: input.Content,
+		Proxied: input.Proxied,
+		TTL:     input.TTL,
+		Comment: input.Comment,
+	}
+	endpoint := client.dnsRecordsBase(zoneID)
+	endpoint.Path = path.Join(endpoint.Path, recordID)
+	return client.writeDNSRecord(ctx, http.MethodPut, endpoint, payload)
+}
+
+func (client *Client) writeDNSRecord(ctx context.Context, method string, endpoint *url.URL, payload dnsRecordWritePayload) (DNSRecord, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return DNSRecord{}, err
+	}
+
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewBuffer(body))
+	if err != nil {
+		return DNSRecord{}, err
+	}
+	client.addHeaders(request)
+	request.Header.Set("Content-Type", "application/json")
+
+	var response apiResponse[dnsRecordPayload]
+	if err := client.do(request, &response); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := response.Err(); err != nil {
+		return DNSRecord{}, err
+	}
+
+	return DNSRecord{
+		ID:      response.Result.ID,
+		Type:    response.Result.Type,
+		Name:    response.Result.Name,
+		Content: response.Result.Content,
+		Proxied: response.Result.Proxied,
+		Comment: response.Result.Comment,
+		TTL:     response.Result.TTL,
+	}, nil
+}
+
 func (client *Client) addHeaders(request *http.Request) {
 	request.Header.Set("Authorization", "Bearer "+client.token)
 	request.Header.Set("User-Agent", client.userAgent)
@@ -411,6 +553,18 @@ func (client *Client) accessTagsBase() *url.URL {
 	return &base
 }
 
+func (client *Client) zonesBase() *url.URL {
+	base := *client.baseURL
+	base.Path = path.Join(base.Path, "zones")
+	return &base
+}
+
+func (client *Client) dnsRecordsBase(zoneID string) *url.URL {
+	base := *client.baseURL
+	base.Path = path.Join(base.Path, "zones", zoneID, "dns_records")
+	return &base
+}
+
 type apiResponse[T any] struct {
 	Success bool       `json:"success"`
 	Errors  []apiError `json:"errors"`
@@ -426,6 +580,30 @@ func (response apiResponse[T]) Err() error {
 
 func (response apiResponse[T]) ErrorSummary() string {
 	return joinErrors(response.Errors)
+}
+
+type apiResponseWithInfo[T any] struct {
+	Success    bool       `json:"success"`
+	Errors     []apiError `json:"errors"`
+	Result     T          `json:"result"`
+	ResultInfo resultInfo `json:"result_info"`
+}
+
+func (response apiResponseWithInfo[T]) Err() error {
+	if response.Success {
+		return nil
+	}
+	return fmt.Errorf("cloudflare API error: %s", joinErrors(response.Errors))
+}
+
+func (response apiResponseWithInfo[T]) ErrorSummary() string {
+	return joinErrors(response.Errors)
+}
+
+type resultInfo struct {
+	Page       int `json:"page"`
+	PerPage    int `json:"per_page"`
+	TotalPages int `json:"total_pages"`
 }
 
 type apiError struct {
@@ -471,6 +649,30 @@ type accessPolicyPayload struct {
 
 type accessTagPayload struct {
 	Name string `json:"name"`
+}
+
+type zonePayload struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type dnsRecordPayload struct {
+	ID      string `json:"id,omitempty"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Proxied bool   `json:"proxied"`
+	Comment string `json:"comment,omitempty"`
+	TTL     int    `json:"ttl"`
+}
+
+type dnsRecordWritePayload struct {
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Proxied bool   `json:"proxied"`
+	TTL     int    `json:"ttl,omitempty"`
+	Comment string `json:"comment,omitempty"`
 }
 
 func (client *Client) do(request *http.Request, response any) error {

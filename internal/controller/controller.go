@@ -7,26 +7,29 @@ import (
 	"log/slog"
 
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/access"
+	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/dns"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/docker"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/labels"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/reconcile"
 )
 
-// Controller polls Docker and reconciles Cloudflare ingress rules and Access apps.
+// Controller polls Docker and reconciles ingress, DNS, and Access resources.
 type Controller struct {
 	docker       *docker.Adapter
 	parser       *labels.Parser
 	reconciler   *reconcile.Engine
+	dnsEngine    *dns.Engine
 	accessEngine *access.Engine
 	interval     time.Duration
 	log          *slog.Logger
 }
 
-func NewController(dockerAdapter *docker.Adapter, parser *labels.Parser, reconciler *reconcile.Engine, accessEngine *access.Engine, interval time.Duration, logger *slog.Logger) *Controller {
+func NewController(dockerAdapter *docker.Adapter, parser *labels.Parser, reconciler *reconcile.Engine, dnsEngine *dns.Engine, accessEngine *access.Engine, interval time.Duration, logger *slog.Logger) *Controller {
 	return &Controller{
 		docker:       dockerAdapter,
 		parser:       parser,
 		reconciler:   reconciler,
+		dnsEngine:    dnsEngine,
 		accessEngine: accessEngine,
 		interval:     interval,
 		log:          logger,
@@ -69,6 +72,12 @@ func (controller *Controller) syncOnce(ctx context.Context) error {
 
 	if err := controller.reconciler.Reconcile(ctx, desiredRoutes); err != nil {
 		return err
+	}
+
+	if controller.dnsEngine != nil {
+		if err := controller.dnsEngine.Reconcile(ctx, desiredRoutes); err != nil {
+			controller.log.Error("DNS sync failed", "error", err)
+		}
 	}
 
 	if controller.accessEngine == nil {
