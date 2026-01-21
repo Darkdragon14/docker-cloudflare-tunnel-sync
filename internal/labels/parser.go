@@ -132,8 +132,13 @@ func (parser *Parser) ParseAccessContainers(containers []docker.ContainerInfo) (
 			continue
 		}
 		if appDomain == "" {
-			errors = append(errors, fmt.Errorf("container %s: missing required %s label", container.Name, AccessLabelAppDomain))
-			continue
+			tunnelDomain := strings.TrimSpace(container.Labels[LabelHost])
+			if tunnelDomain == "" {
+				errors = append(errors, fmt.Errorf("container %s: missing %s; set %s or %s", container.Name, AccessLabelAppDomain, AccessLabelAppDomain, LabelHost))
+				continue
+			}
+			appDomain = tunnelDomain
+			errors = append(errors, fmt.Errorf("container %s: %s not set; using %s", container.Name, AccessLabelAppDomain, LabelHost))
 		}
 
 		policies, policyErrors := parseAccessPolicies(container)

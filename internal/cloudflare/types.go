@@ -117,4 +117,5 @@ type DNSAPI interface {
 	ListDNSRecords(ctx context.Context, zoneID string, recordType string, name string) ([]DNSRecord, error)
 	CreateDNSRecord(ctx context.Context, zoneID string, input DNSRecordInput) (DNSRecord, error)
 	UpdateDNSRecord(ctx context.Context, zoneID string, recordID string, input DNSRecordInput) (DNSRecord, error)
+	DeleteDNSRecord(ctx context.Context, zoneID string, recordID string) error
 }

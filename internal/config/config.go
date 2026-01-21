@@ -14,6 +14,7 @@ type Config struct {
 	Docker     DockerConfig
 	Cloudflare CloudflareConfig
 	Controller ControllerConfig
+	ManagedBy  string
 	LogLevel   slog.Level
 }
 
@@ -36,6 +37,7 @@ type ControllerConfig struct {
 	ManageTunnel bool
 	ManageAccess bool
 	ManageDNS    bool
+	DeleteDNS    bool
 }
 
 // Load parses configuration from environment variables.
@@ -66,6 +68,12 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	deleteDNS, err := parseBoolEnv("SYNC_DELETE_DNS", false)
+	if err != nil {
+		return Config{}, err
+	}
+
+	managedBy := strings.TrimSpace(os.Getenv("SYNC_MANAGED_BY"))
 
 	logLevel, err := parseLogLevel(getEnvDefault("LOG_LEVEL", "info"))
 	if err != nil {
@@ -103,8 +111,10 @@ func Load() (Config, error) {
 			ManageTunnel: manageTunnel,
 			ManageAccess: manageAccess,
 			ManageDNS:    manageDNS,
+			DeleteDNS:    deleteDNS,
 		},
-		LogLevel: logLevel,
+		ManagedBy: managedBy,
+		LogLevel:  logLevel,
 	}, nil
 }
 

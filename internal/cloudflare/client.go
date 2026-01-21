@@ -492,6 +492,24 @@ func (client *Client) UpdateDNSRecord(ctx context.Context, zoneID string, record
 	return client.writeDNSRecord(ctx, http.MethodPut, endpoint, payload)
 }
 
+// DeleteDNSRecord removes a DNS record in the given zone.
+func (client *Client) DeleteDNSRecord(ctx context.Context, zoneID string, recordID string) error {
+	endpoint := client.dnsRecordsBase(zoneID)
+	endpoint.Path = path.Join(endpoint.Path, recordID)
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint.String(), nil)
+	if err != nil {
+		return err
+	}
+	client.addHeaders(request)
+
+	var response apiResponse[dnsRecordPayload]
+	if err := client.do(request, &response); err != nil {
+		return err
+	}
+	return response.Err()
+}
+
 func (client *Client) writeDNSRecord(ctx context.Context, method string, endpoint *url.URL, payload dnsRecordWritePayload) (DNSRecord, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -699,7 +717,7 @@ func (client *Client) do(request *http.Request, response any) error {
 			summary = strings.TrimSpace(payload.ErrorSummary())
 		}
 		if summary == "" || summary == "unknown error" {
-			summary = strings.TrimSpace(string(body))
+			return fmt.Errorf("cloudflare API request failed with status %s", resp.Status)
 		}
 		return fmt.Errorf("cloudflare API request failed with status %s: %s", resp.Status, summary)
 	}

@@ -60,6 +60,8 @@ internal/reconcile/
 | `SYNC_MANAGED_TUNNEL` | no | `false` | Allow this tool to overwrite the tunnel ingress configuration. |
 | `SYNC_MANAGED_ACCESS` | no | `false` | Allow this tool to create/update Access apps and policies. |
 | `SYNC_MANAGED_DNS` | no | `false` | Allow this tool to create/update DNS CNAME records for tunnel hostnames. |
+| `SYNC_DELETE_DNS` | no | `false` | Delete managed DNS records when hostnames are no longer labeled. |
+| `SYNC_MANAGED_BY` | no | `docker-cf-tunnel-sync` | Override the managed-by tag/comment value (used for Access tags and DNS comments). |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 
 ## Usage
@@ -86,6 +88,7 @@ docker run --rm \
   -e SYNC_MANAGED_TUNNEL=true \
   -e SYNC_MANAGED_ACCESS=true \
   -e SYNC_MANAGED_DNS=true \
+  -e SYNC_DELETE_DNS=true \
   -e SYNC_POLL_INTERVAL=30s \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   docker-cloudflare-tunnel-sync:local
@@ -104,6 +107,7 @@ services:
       SYNC_MANAGED_TUNNEL: "true"
       SYNC_MANAGED_ACCESS: "true"
       SYNC_MANAGED_DNS: "true"
+      SYNC_DELETE_DNS: "true"
       SYNC_POLL_INTERVAL: 30s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -131,7 +135,7 @@ services:
 
 If you already run a `cloudflared` container, the credentials file is typically mounted under `/etc/cloudflared/<tunnel-id>.json` (or the path you configured). Use the `tunnel_id` and `account_tag` fields from that file to set `CF_TUNNEL_ID` and `CF_ACCOUNT_ID`.
 
-When DNS automation is enabled, the controller selects the zone by the longest matching suffix and creates CNAME records for each hostname.
+When DNS automation is enabled, the controller selects the zone by the longest matching suffix and creates CNAME records for each hostname. The managed tag/comment can be customized with `SYNC_MANAGED_BY`.
 
 ## Docker labels
 
@@ -146,13 +150,13 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 
 ## Access labels
 
-Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails and IPs. If only `policy.N.id` is provided, the policy is referenced without updates.
+Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails and IPs. If only `policy.N.id` is provided, the policy is referenced without updates. If `cloudflare.access.app.domain` is omitted, the controller uses `cloudflare.tunnel.hostname` and logs a warning.
 
 | Label | Required | Example | Description |
 | --- | --- | --- | --- |
 | `cloudflare.access.enable` | yes | `true` | Opt-in flag for Access management. |
 | `cloudflare.access.app.name` | yes | `nginx` | Access application name. |
-| `cloudflare.access.app.domain` | yes | `nginx.example.com` | Access application domain. |
+| `cloudflare.access.app.domain` | yes* | `nginx.example.com` | Access application domain (required unless `cloudflare.tunnel.hostname` is set). |
 | `cloudflare.access.app.id` | no | `app-uuid` | Optional existing app ID to update. |
 | `cloudflare.access.policy.1.name` | yes* | `allow-team` | Policy name (required unless using ID-only mode). |
 | `cloudflare.access.policy.1.action` | yes* | `allow` | Policy action (`allow` or `deny`, required unless using ID-only mode). |
@@ -169,8 +173,8 @@ When no app or policy ID is provided, the controller matches existing resources 
 - When `SYNC_MANAGED_TUNNEL=true`, the ingress list is fully managed and any non-labeled rules are removed (warning: existing tunnel rules will be deleted).
 - When the flag is `false`, differences are logged and skipped.
 - Access apps/policies are reconciled when `SYNC_MANAGED_ACCESS=true` and are matched by ID or by name+domain; policy includes support emails and IPs only, and ID-only policies are never updated.
-- Access apps tagged with `managed-by=docker-cf-tunnel-sync` are deleted when no longer defined by labels; Access policies are not deleted automatically.
-- DNS records are created/updated when `SYNC_MANAGED_DNS=true` by matching the longest zone suffix; records are CNAMEs to `<tunnel-id>.cfargotunnel.com`, proxied, and only updated when already managed (comment `managed-by=docker-cf-tunnel-sync`) or already pointing to the tunnel.
+- Access apps tagged with `managed-by=<value>` are deleted when no longer defined by labels; Access policies are not deleted automatically.
+- DNS records are created/updated when `SYNC_MANAGED_DNS=true` by matching the longest zone suffix; records are CNAMEs to `<tunnel-id>.cfargotunnel.com`, proxied, and only updated when already managed (comment `managed-by=<value>`) or already pointing to the tunnel. When `SYNC_DELETE_DNS=true`, managed records not backed by labels are deleted.
 - Duplicate hostname/path definitions are rejected to keep outcomes deterministic.
 - All operations are idempotent and safe to run continuously.
 

@@ -13,18 +13,25 @@ import (
 
 // Engine reconciles Access applications and policies.
 type Engine struct {
-	api    cloudflare.AccessAPI
-	log    *slog.Logger
-	dryRun bool
-	manage bool
+	api        cloudflare.AccessAPI
+	log        *slog.Logger
+	dryRun     bool
+	manage     bool
+	managedTag string
 }
 
-func NewEngine(api cloudflare.AccessAPI, logger *slog.Logger, dryRun bool, manage bool) *Engine {
-	return &Engine{api: api, log: logger, dryRun: dryRun, manage: manage}
+func NewEngine(api cloudflare.AccessAPI, logger *slog.Logger, dryRun bool, manage bool, managedBy string) *Engine {
+	return &Engine{
+		api:        api,
+		log:        logger,
+		dryRun:     dryRun,
+		manage:     manage,
+		managedTag: model.AccessManagedTag(managedBy),
+	}
 }
 
 func (engine *Engine) Reconcile(ctx context.Context, apps []model.AccessAppSpec) error {
-	if len(apps) == 0 {
+	if len(apps) == 0 && !engine.manage {
 		return nil
 	}
 
@@ -33,9 +40,12 @@ func (engine *Engine) Reconcile(ctx context.Context, apps []model.AccessAppSpec)
 		return err
 	}
 
-	existingPolicies, err := engine.api.ListAccessPolicies(ctx)
-	if err != nil {
-		return err
+	var existingPolicies []cloudflare.AccessPolicyRecord
+	if len(apps) > 0 {
+		existingPolicies, err = engine.api.ListAccessPolicies(ctx)
+		if err != nil {
+			return err
+		}
 	}
 
 	appByID := map[string]cloudflare.AccessAppRecord{}
@@ -64,8 +74,8 @@ func (engine *Engine) Reconcile(ctx context.Context, apps []model.AccessAppSpec)
 	for _, app := range apps {
 		tagging := false
 		if engine.manage {
-			if err := engine.api.EnsureAccessTag(ctx, model.AccessManagedTag); err != nil {
-				engine.log.Warn("failed to ensure access tag; proceeding without tagging", "tag", model.AccessManagedTag, "error", err)
+			if err := engine.api.EnsureAccessTag(ctx, engine.managedTag); err != nil {
+				engine.log.Warn("failed to ensure access tag; proceeding without tagging", "tag", engine.managedTag, "error", err)
 			} else {
 				tagging = true
 			}
@@ -251,7 +261,7 @@ func (engine *Engine) buildPolicyInput(spec model.AccessPolicySpec) cloudflare.A
 func (engine *Engine) buildAppInput(spec model.AccessAppSpec, policyRefs []cloudflare.AccessPolicyRef, existingTags []string, tagging bool) cloudflare.AccessAppInput {
 	tags := existingTags
 	if tagging {
-		tags = mergeTags(existingTags, model.AccessManagedTag)
+		tags = mergeTags(existingTags, engine.managedTag)
 	}
 
 	return cloudflare.AccessAppInput{
@@ -291,7 +301,7 @@ func (engine *Engine) deleteOrphanedApps(ctx context.Context, existing []cloudfl
 		if _, wanted := desired[app.ID]; wanted {
 			continue
 		}
-		if !hasManagedTag(app.Tags) {
+		if !hasManagedTag(app.Tags, engine.managedTag) {
 			continue
 		}
 		engine.log.Warn("managed access app no longer desired; deleting", "app", app.Name)
@@ -383,9 +393,9 @@ func mergeTags(existing []string, required string) []string {
 	return tags
 }
 
-func hasManagedTag(tags []string) bool {
+func hasManagedTag(tags []string, managedTag string) bool {
 	for _, tag := range tags {
-		if tag == model.AccessManagedTag {
+		if tag == managedTag {
 			return true
 		}
 	}

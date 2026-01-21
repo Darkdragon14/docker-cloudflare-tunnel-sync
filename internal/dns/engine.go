@@ -19,15 +19,25 @@ const (
 
 // Engine reconciles DNS records for tunnel hostnames.
 type Engine struct {
-	api      cloudflare.DNSAPI
-	log      *slog.Logger
-	dryRun   bool
-	manage   bool
-	tunnelID string
+	api            cloudflare.DNSAPI
+	log            *slog.Logger
+	dryRun         bool
+	manage         bool
+	delete         bool
+	tunnelID       string
+	managedComment string
 }
 
-func NewEngine(api cloudflare.DNSAPI, logger *slog.Logger, dryRun bool, manage bool, tunnelID string) *Engine {
-	return &Engine{api: api, log: logger, dryRun: dryRun, manage: manage, tunnelID: tunnelID}
+func NewEngine(api cloudflare.DNSAPI, logger *slog.Logger, dryRun bool, manage bool, delete bool, tunnelID string, managedBy string) *Engine {
+	return &Engine{
+		api:            api,
+		log:            logger,
+		dryRun:         dryRun,
+		manage:         manage,
+		delete:         delete,
+		tunnelID:       tunnelID,
+		managedComment: model.DNSManagedComment(managedBy),
+	}
 }
 
 func (engine *Engine) Reconcile(ctx context.Context, routes []model.RouteSpec) error {
@@ -36,7 +46,7 @@ func (engine *Engine) Reconcile(ctx context.Context, routes []model.RouteSpec) e
 	}
 
 	hostnames := uniqueHostnames(routes)
-	if len(hostnames) == 0 {
+	if len(hostnames) == 0 && !engine.delete {
 		return nil
 	}
 
@@ -50,65 +60,93 @@ func (engine *Engine) Reconcile(ctx context.Context, routes []model.RouteSpec) e
 	}
 
 	orderedZones := orderZones(zones)
-	for _, hostname := range hostnames {
-		zone, ok := matchZone(hostname, orderedZones)
-		if !ok {
-			engine.log.Warn("no matching zone for hostname; DNS record skipped", "hostname", hostname)
-			continue
+	for _, zone := range orderedZones {
+		knownHostnames := filterHostnamesForZone(hostnames, zone.Name)
+		byName := map[string]struct{}{}
+		for _, hostname := range knownHostnames {
+			byName[hostname] = struct{}{}
 		}
 
-		records, err := engine.api.ListDNSRecords(ctx, zone.ID, dnsRecordType, hostname)
+		records, err := engine.api.ListDNSRecords(ctx, zone.ID, dnsRecordType, "")
 		if err != nil {
-			engine.log.Error("failed to list DNS records", "hostname", hostname, "zone", zone.Name, "error", err)
-			continue
-		}
-		if len(records) > 1 {
-			engine.log.Warn("multiple DNS records found; skipping", "hostname", hostname, "zone", zone.Name)
+			engine.log.Error("failed to list DNS records", "zone", zone.Name, "error", err)
 			continue
 		}
 
-		desired := cloudflare.DNSRecordInput{
-			Type:    dnsRecordType,
-			Name:    hostname,
-			Content: engine.tunnelTarget(),
-			Proxied: true,
-			TTL:     dnsRecordTTL,
-			Comment: model.DNSManagedComment,
-		}
-
-		if len(records) == 0 {
-			engine.log.Info("creating DNS record", "hostname", hostname, "zone", zone.Name)
+		for _, record := range records {
+			hostname := strings.ToLower(strings.TrimSuffix(record.Name, "."))
+			if _, ok := byName[hostname]; ok {
+				continue
+			}
+			if !engine.delete {
+				continue
+			}
+			if record.Comment != engine.managedComment {
+				continue
+			}
+			engine.log.Warn("deleting managed DNS record no longer desired", "hostname", hostname, "zone", zone.Name)
 			if engine.dryRun {
 				continue
 			}
-			_, err := engine.api.CreateDNSRecord(ctx, zone.ID, desired)
-			if err != nil {
-				engine.log.Error("failed to create DNS record", "hostname", hostname, "zone", zone.Name, "error", err)
+			if err := engine.api.DeleteDNSRecord(ctx, zone.ID, record.ID); err != nil {
+				engine.log.Error("failed to delete DNS record", "hostname", hostname, "zone", zone.Name, "error", err)
 			}
-			continue
 		}
 
-		record := records[0]
-		if record.Type != dnsRecordType {
-			engine.log.Warn("existing DNS record has non-CNAME type; skipping", "hostname", hostname, "zone", zone.Name, "type", record.Type)
-			continue
-		}
-		if !engine.isManagedRecord(record, desired) {
-			engine.log.Warn("existing DNS record is not managed; skipping", "hostname", hostname, "zone", zone.Name)
-			continue
-		}
-		if dnsRecordEqual(record, desired) {
-			engine.log.Debug("DNS record up-to-date", "hostname", hostname, "zone", zone.Name)
-			continue
-		}
+		for _, hostname := range knownHostnames {
+			records, err := engine.api.ListDNSRecords(ctx, zone.ID, dnsRecordType, hostname)
+			if err != nil {
+				engine.log.Error("failed to list DNS records", "hostname", hostname, "zone", zone.Name, "error", err)
+				continue
+			}
+			if len(records) > 1 {
+				engine.log.Warn("multiple DNS records found; skipping", "hostname", hostname, "zone", zone.Name)
+				continue
+			}
 
-		engine.log.Info("updating DNS record", "hostname", hostname, "zone", zone.Name)
-		if engine.dryRun {
-			continue
-		}
-		_, err = engine.api.UpdateDNSRecord(ctx, zone.ID, record.ID, desired)
-		if err != nil {
-			engine.log.Error("failed to update DNS record", "hostname", hostname, "zone", zone.Name, "error", err)
+			desired := cloudflare.DNSRecordInput{
+				Type:    dnsRecordType,
+				Name:    hostname,
+				Content: engine.tunnelTarget(),
+				Proxied: true,
+				TTL:     dnsRecordTTL,
+				Comment: engine.managedComment,
+			}
+
+			if len(records) == 0 {
+				engine.log.Info("creating DNS record", "hostname", hostname, "zone", zone.Name)
+				if engine.dryRun {
+					continue
+				}
+				_, err := engine.api.CreateDNSRecord(ctx, zone.ID, desired)
+				if err != nil {
+					engine.log.Error("failed to create DNS record", "hostname", hostname, "zone", zone.Name, "error", err)
+				}
+				continue
+			}
+
+			record := records[0]
+			if record.Type != dnsRecordType {
+				engine.log.Warn("existing DNS record has non-CNAME type; skipping", "hostname", hostname, "zone", zone.Name, "type", record.Type)
+				continue
+			}
+			if !engine.isManagedRecord(record, desired) {
+				engine.log.Warn("existing DNS record is not managed; skipping", "hostname", hostname, "zone", zone.Name)
+				continue
+			}
+			if dnsRecordEqual(record, desired) {
+				engine.log.Debug("DNS record up-to-date", "hostname", hostname, "zone", zone.Name)
+				continue
+			}
+
+			engine.log.Info("updating DNS record", "hostname", hostname, "zone", zone.Name)
+			if engine.dryRun {
+				continue
+			}
+			_, err = engine.api.UpdateDNSRecord(ctx, zone.ID, record.ID, desired)
+			if err != nil {
+				engine.log.Error("failed to update DNS record", "hostname", hostname, "zone", zone.Name, "error", err)
+			}
 		}
 	}
 
@@ -120,7 +158,7 @@ func (engine *Engine) tunnelTarget() string {
 }
 
 func (engine *Engine) isManagedRecord(record cloudflare.DNSRecord, desired cloudflare.DNSRecordInput) bool {
-	if record.Comment == model.DNSManagedComment {
+	if record.Comment == engine.managedComment {
 		return true
 	}
 	return strings.EqualFold(record.Content, desired.Content)
@@ -163,6 +201,18 @@ func matchZone(hostname string, zones []cloudflare.Zone) (cloudflare.Zone, bool)
 		}
 	}
 	return cloudflare.Zone{}, false
+}
+
+func filterHostnamesForZone(hostnames []string, zoneName string) []string {
+	items := []string{}
+	lowerZone := strings.ToLower(strings.TrimSuffix(zoneName, "."))
+	for _, hostname := range hostnames {
+		lower := strings.ToLower(strings.TrimSuffix(hostname, "."))
+		if lower == lowerZone || strings.HasSuffix(lower, "."+lowerZone) {
+			items = append(items, lower)
+		}
+	}
+	return items
 }
 
 func dnsRecordEqual(record cloudflare.DNSRecord, desired cloudflare.DNSRecordInput) bool {

@@ -43,8 +43,8 @@ func main() {
 
 	parser := labels.NewParser()
 	reconciler := reconcile.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageTunnel)
-	dnsEngine := dns.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageDNS, cfg.Cloudflare.TunnelID)
-	accessEngine := access.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageAccess)
+	dnsEngine := dns.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageDNS, cfg.Controller.DeleteDNS, cfg.Cloudflare.TunnelID, cfg.ManagedBy)
+	accessEngine := access.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageAccess, cfg.ManagedBy)
 	controller := controller.NewController(dockerAdapter, parser, reconciler, dnsEngine, accessEngine, cfg.Controller.PollInterval, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
