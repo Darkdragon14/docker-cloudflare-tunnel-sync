@@ -65,6 +65,12 @@ Build a local image:
 docker build -t docker-cloudflare-tunnel-sync:local .
 ```
 
+Pull the published image from GitHub Container Registry:
+
+```
+docker pull ghcr.io/<owner>/docker-cloudflare-tunnel-sync:latest
+```
+
 Run with Docker (read-only socket mount):
 
 ```
