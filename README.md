@@ -8,10 +8,10 @@ Automatically reconcile Cloudflare Tunnel ingress routes from Docker container l
 2. Start the controller with a read-only Docker socket mount.
 3. Add labels to containers you want exposed via the tunnel.
 
-Build a local image:
+Pull the image:
 
 ```
-docker build -t docker-cloudflare-tunnel-sync:local .
+docker pull ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
 ```
 
 Run with Docker (read-only socket mount):
@@ -27,7 +27,7 @@ docker run --rm \
   -e SYNC_DELETE_DNS=true \
   -e SYNC_POLL_INTERVAL=30s \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  docker-cloudflare-tunnel-sync:local
+  ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
 ```
 
 Docker Compose quickstart (controller + nginx):
@@ -35,7 +35,7 @@ Docker Compose quickstart (controller + nginx):
 ```
 services:
   tunnel-sync:
-    image: docker-cloudflare-tunnel-sync:local
+    image: ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
     environment:
       CF_API_TOKEN: your-token
       CF_ACCOUNT_ID: your-account-id
@@ -105,3 +105,10 @@ Access applications are only managed when `cloudflare.access.enable=true`. Polic
 | `cloudflare.access.policy.1.id` | no | `policy-uuid` | Optional existing policy ID. If set without other policy fields, the policy is referenced only and not updated (same behavior for name-only references). |
 
 When no app or policy ID is provided, the controller matches existing resources by name (and domain for apps); if multiple matches exist, reconciliation is skipped with a warning. Name-only policy references must match an existing policy. If a policy ID is provided but not found in account-level policies, the controller will still attach the ID (useful for app-scoped policies).
+
+## Contributing
+
+- Open an issue to discuss changes or report bugs.
+- Keep labels explicit and namespaced; avoid hidden defaults.
+- Build locally with `docker build -t docker-cloudflare-tunnel-sync:local .`.
+- Format Go files with `gofmt` and run `go test ./...` (Go 1.24+).

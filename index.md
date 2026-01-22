@@ -57,3 +57,7 @@ Resulting Cloudflare resources:
 - Infrastructure engineers managing container fleets.
 - Operators who want Cloudflare resources to track labeled services.
 - Self-hosted users who prefer explicit, label-driven control.
+
+## Contributing
+
+Issues and pull requests are welcome. Build locally with `docker build -t docker-cloudflare-tunnel-sync:local .`, then run `gofmt` and `go test ./...` with Go 1.24+ before submitting.

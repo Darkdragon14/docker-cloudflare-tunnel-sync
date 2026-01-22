@@ -1,0 +1,5 @@
+remote_theme: pages-themes/hacker@v0.2.0
+plugins:
+  - jekyll-remote-theme
+title: docker-cloudflare-tunnel-sync
+description: Automatically reconcile Cloudflare Tunnel ingress routes from Docker container labels.
