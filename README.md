@@ -90,7 +90,7 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 
 ### Access labels
 
-Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails and IPs. If only `policy.N.id` is provided, the policy is referenced without updates. If `cloudflare.access.app.domain` is omitted, the controller uses `cloudflare.tunnel.hostname` and logs a warning.
+Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails and IPs. If only `policy.N.id` or `policy.N.name` is provided, the policy is referenced without updates. If `cloudflare.access.app.domain` is omitted, the controller uses `cloudflare.tunnel.hostname`.
 
 | Label | Required | Example | Description |
 | --- | --- | --- | --- |
@@ -98,10 +98,10 @@ Access applications are only managed when `cloudflare.access.enable=true`. Polic
 | `cloudflare.access.app.name` | yes | `nginx` | Access application name. |
 | `cloudflare.access.app.domain` | yes* | `nginx.example.com` | Access application domain (required unless `cloudflare.tunnel.hostname` is set). |
 | `cloudflare.access.app.id` | no | `app-uuid` | Optional existing app ID to update. |
-| `cloudflare.access.policy.1.name` | yes* | `allow-team` | Policy name (required unless using ID-only mode). |
-| `cloudflare.access.policy.1.action` | yes* | `allow` | Policy action (`allow` or `deny`, required unless using ID-only mode). |
+| `cloudflare.access.policy.1.name` | yes* | `allow-team` | Policy name (required unless using ID-only reference; if set without other policy fields, the policy is referenced by name). |
+| `cloudflare.access.policy.1.action` | yes* | `allow` | Policy action (`allow` or `deny`, required unless using reference-only mode). |
 | `cloudflare.access.policy.1.include.emails` | no | `me@example.com` | Comma-separated allowed emails. |
 | `cloudflare.access.policy.1.include.ips` | no | `192.0.2.0/24` | Comma-separated allowed IPs/CIDRs. |
-| `cloudflare.access.policy.1.id` | no | `policy-uuid` | Optional existing policy ID. If set without other policy fields, the policy is referenced only and not updated. |
+| `cloudflare.access.policy.1.id` | no | `policy-uuid` | Optional existing policy ID. If set without other policy fields, the policy is referenced only and not updated (same behavior for name-only references). |
 
-When no app or policy ID is provided, the controller matches existing resources by name (and domain for apps). If multiple matches exist, reconciliation is skipped with a warning. If a policy ID is provided but not found in account-level policies, the controller will still attach the ID (useful for app-scoped policies).
+When no app or policy ID is provided, the controller matches existing resources by name (and domain for apps); if multiple matches exist, reconciliation is skipped with a warning. Name-only policy references must match an existing policy. If a policy ID is provided but not found in account-level policies, the controller will still attach the ID (useful for app-scoped policies).

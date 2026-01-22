@@ -138,7 +138,6 @@ func (parser *Parser) ParseAccessContainers(containers []docker.ContainerInfo) (
 				continue
 			}
 			appDomain = tunnelDomain
-			errors = append(errors, fmt.Errorf("container %s: %s not set; using %s", container.Name, AccessLabelAppDomain, LabelHost))
 		}
 
 		policies, policyErrors := parseAccessPolicies(container)
@@ -246,9 +245,13 @@ func parseAccessPolicies(container docker.ContainerInfo) ([]model.AccessPolicySp
 	result := make([]model.AccessPolicySpec, 0, len(indexes))
 	for _, index := range indexes {
 		policy := policies[index]
-		managed := true
-		if policy.ID != "" && policy.Name == "" && policy.Action == "" && len(policy.IncludeEmails) == 0 && len(policy.IncludeIPs) == 0 {
-			managed = false
+		referenceOnly := policy.Action == "" && len(policy.IncludeEmails) == 0 && len(policy.IncludeIPs) == 0
+		managed := !referenceOnly
+		if referenceOnly {
+			if policy.ID == "" && policy.Name == "" {
+				errors = append(errors, fmt.Errorf("container %s: access policy %d missing id or name", container.Name, index))
+				continue
+			}
 		}
 		if managed {
 			if policy.Name == "" {

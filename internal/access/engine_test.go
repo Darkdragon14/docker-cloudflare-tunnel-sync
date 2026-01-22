@@ -35,6 +35,33 @@ func TestEnsurePoliciesIDOnlyReference(t *testing.T) {
 	}
 }
 
+func TestEnsurePoliciesNameOnlyReference(t *testing.T) {
+	api := &stubAccessAPI{}
+	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
+	engine := NewEngine(api, logger, false, true, testManagedBy)
+
+	app := model.AccessAppSpec{
+		Name: "app",
+		Policies: []model.AccessPolicySpec{
+			{Name: "Existing", Managed: false},
+		},
+	}
+	policyByName := map[string][]cloudflare.AccessPolicyRecord{
+		"existing": []cloudflare.AccessPolicyRecord{{ID: "policy-1", Name: "Existing"}},
+	}
+
+	refs, ok := engine.ensurePolicies(context.Background(), app, map[string]cloudflare.AccessPolicyRecord{}, policyByName)
+	if !ok {
+		t.Fatalf("expected ok to be true")
+	}
+	if len(refs) != 1 || refs[0].ID != "policy-1" {
+		t.Fatalf("unexpected policy refs: %+v", refs)
+	}
+	if api.updatePolicyCalls != 0 {
+		t.Fatalf("expected no policy updates, got %d", api.updatePolicyCalls)
+	}
+}
+
 func TestEnsurePoliciesManagedMissingStops(t *testing.T) {
 	api := &stubAccessAPI{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))

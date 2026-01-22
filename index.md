@@ -36,7 +36,7 @@ labels:
 Resulting Cloudflare resources:
 
 - An ingress rule for `app.example.com` pointing to `http://app:8080`.
-- Optional DNS CNAME and Access app/policy management when the corresponding `SYNC_MANAGED_*` flags are enabled.
+- Optional DNS CNAME and Access app/policy management when the corresponding `SYNC_MANAGED_*` flags are enabled (policies can be referenced by name or ID).
 
 ## Design principles
 

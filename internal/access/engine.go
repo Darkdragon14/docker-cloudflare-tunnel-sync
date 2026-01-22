@@ -151,6 +151,20 @@ func (engine *Engine) ensurePolicies(ctx context.Context, app model.AccessAppSpe
 			continue
 		}
 
+		if !policy.Managed {
+			record, found, ok := engine.resolvePolicyByName(policy, policyByName)
+			if !ok {
+				return nil, false
+			}
+			if !found {
+				engine.log.Warn("access policy name not found; skipping access app", "policy", policyLabel(policy), "app", app.Name)
+				return nil, false
+			}
+			policyRefs = append(policyRefs, cloudflare.AccessPolicyRef{ID: record.ID, Precedence: precedence})
+			engine.updatePolicyIfNeeded(ctx, app, policy, record)
+			continue
+		}
+
 		record, found, ok := engine.resolvePolicyByName(policy, policyByName)
 		if !ok {
 			return nil, false
@@ -196,7 +210,7 @@ func (engine *Engine) resolvePolicyByName(spec model.AccessPolicySpec, policyByN
 
 func (engine *Engine) updatePolicyIfNeeded(ctx context.Context, app model.AccessAppSpec, spec model.AccessPolicySpec, record cloudflare.AccessPolicyRecord) {
 	if !spec.Managed {
-		engine.log.Debug("access policy id-only reference; skipping updates", "policy", policyLabel(spec))
+		engine.log.Debug("access policy reference-only; skipping updates", "policy", policyLabel(spec))
 		return
 	}
 	if record.HasUnsupportedRules {

@@ -193,6 +193,38 @@ func TestParseAccessContainersIDOnlyPolicy(t *testing.T) {
 	}
 }
 
+func TestParseAccessContainersNameOnlyPolicy(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "access-app",
+			Labels: map[string]string{
+				AccessLabelEnable:                  "true",
+				AccessLabelAppName:                 "name-only",
+				AccessLabelAppDomain:               "name-only.example.com",
+				AccessLabelPolicyPrefix + "1.name": "existing-policy",
+			},
+		},
+	}
+
+	apps, errs := parser.ParseAccessContainers(containers)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(apps))
+	}
+	policy := apps[0].Policies[0]
+	if policy.Managed {
+		t.Fatalf("expected name-only policy to be unmanaged")
+	}
+	if policy.Name != "existing-policy" {
+		t.Fatalf("expected policy name to be existing-policy, got %s", policy.Name)
+	}
+}
+
 func TestParseAccessContainersErrors(t *testing.T) {
 	parser := NewParser()
 
