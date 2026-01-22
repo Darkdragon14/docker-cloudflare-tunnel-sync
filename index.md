@@ -4,6 +4,8 @@ _No dashboard drift. Containers are the source of truth._
 
 The controller reconciles Docker labels into Cloudflare Tunnel ingress, DNS, and Access resources.
 
+> **Disclaimer:** Use a dedicated Cloudflare Tunnel for this controller. If you attach it to an existing tunnel that already has published application routes, enabling managed sync can delete those routes.
+
 ## The problem
 
 Cloudflare Tunnel configuration can drift when container routes are added or removed but dashboard settings are not kept in sync. That mismatch leads to stale ingress rules, outdated Access apps, or DNS records that no longer reflect what is actually running. Over time, manual cleanup becomes a reliability risk.

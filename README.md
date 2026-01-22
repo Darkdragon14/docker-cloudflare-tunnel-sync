@@ -2,6 +2,8 @@
 
 Automatically reconcile Cloudflare Tunnel ingress routes from Docker container labels. Containers opt in via explicit, namespaced labels and remain the single source of truth for route definitions.
 
+> **Disclaimer:** Use a dedicated Cloudflare Tunnel for this controller. If you attach it to an existing tunnel that already has published application routes, enabling managed sync can delete those routes.
+
 ## Quickstart
 
 1. Create or identify a Cloudflare Tunnel and API token.
