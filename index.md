@@ -1,5 +1,7 @@
 # Docker labels → Cloudflare Tunnel
 
+[![Release](https://img.shields.io/github/v/release/Darkdragon14/docker-cloudflare-tunnel-sync?sort=semver)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/releases/latest) [![Tests](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/tests.yml) [![Container](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/ghcr.yml/badge.svg?branch=main)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/ghcr.yml)
+
 _No dashboard drift. Containers are the source of truth._
 
 The controller reconciles Docker labels into Cloudflare Tunnel ingress, DNS, and Access resources.
