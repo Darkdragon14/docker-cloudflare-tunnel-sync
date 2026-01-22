@@ -9,10 +9,12 @@ import (
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/model"
 )
 
+const testManagedBy = "test-managed"
+
 func TestEnsurePoliciesIDOnlyReference(t *testing.T) {
 	api := &stubAccessAPI{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
-	engine := NewEngine(api, logger, false, true)
+	engine := NewEngine(api, logger, false, true, testManagedBy)
 
 	app := model.AccessAppSpec{
 		Name: "app",
@@ -36,7 +38,7 @@ func TestEnsurePoliciesIDOnlyReference(t *testing.T) {
 func TestEnsurePoliciesManagedMissingStops(t *testing.T) {
 	api := &stubAccessAPI{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
-	engine := NewEngine(api, logger, false, true)
+	engine := NewEngine(api, logger, false, true, testManagedBy)
 
 	app := model.AccessAppSpec{
 		Name: "app",
@@ -54,7 +56,7 @@ func TestEnsurePoliciesManagedMissingStops(t *testing.T) {
 func TestUpdatePolicyIfNeededDryRun(t *testing.T) {
 	api := &stubAccessAPI{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
-	engine := NewEngine(api, logger, true, true)
+	engine := NewEngine(api, logger, true, true, testManagedBy)
 
 	spec := model.AccessPolicySpec{
 		Name:          "policy",
@@ -81,7 +83,7 @@ func TestUpdatePolicyIfNeededDryRun(t *testing.T) {
 func TestReconcileSkipsCreateWhenManageDisabled(t *testing.T) {
 	api := &stubAccessAPI{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
-	engine := NewEngine(api, logger, false, false)
+	engine := NewEngine(api, logger, false, false, testManagedBy)
 
 	apps := []model.AccessAppSpec{
 		{
@@ -104,10 +106,10 @@ func TestReconcileSkipsCreateWhenManageDisabled(t *testing.T) {
 func TestDeleteOrphanedAppsDeletesManaged(t *testing.T) {
 	api := &stubAccessAPI{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
-	engine := NewEngine(api, logger, false, true)
+	engine := NewEngine(api, logger, false, true, testManagedBy)
 
 	existing := []cloudflare.AccessAppRecord{
-		{ID: "app-1", Name: "app", Tags: []string{model.AccessManagedTag}},
+		{ID: "app-1", Name: "app", Tags: []string{model.AccessManagedTag(testManagedBy)}},
 	}
 	engine.deleteOrphanedApps(context.Background(), existing, map[string]struct{}{})
 
