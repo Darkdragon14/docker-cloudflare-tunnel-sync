@@ -61,9 +61,7 @@ services:
       cloudflare.access.enable: "true"
       cloudflare.access.app.name: nginx
       cloudflare.access.app.tags: "team,internal"
-      cloudflare.access.policy.1.name: allow-team
-      cloudflare.access.policy.1.action: allow
-      cloudflare.access.policy.1.include.emails: admin@example.com
+      cloudflare.access.policy.1.name: existing-policy-name
 ```
 
 ## Configuration
