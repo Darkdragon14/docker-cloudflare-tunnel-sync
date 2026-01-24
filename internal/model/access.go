@@ -6,6 +6,8 @@ type AccessAppSpec struct {
 	Name     string
 	Domain   string
 	Policies []AccessPolicySpec
+	Tags     []string
+	TagsSet  bool
 	Source   SourceRef
 }
 
