@@ -85,7 +85,19 @@ func (engine *Engine) Reconcile(ctx context.Context, apps []model.AccessAppSpec)
 		if !ok {
 			continue
 		}
-		appRecord, found := engine.resolveAccessApp(app, appByID, appByKey)
+
+		appSpec := app
+		if engine.manage && app.TagsSet && len(app.Tags) > 0 {
+			ensuredTags, tagsOK := engine.ensureAppTags(ctx, app)
+			if !tagsOK {
+				engine.log.Warn("access app tags could not be ensured; keeping existing tags", "app", app.Name)
+				appSpec.TagsSet = false
+			} else {
+				appSpec.Tags = ensuredTags
+			}
+		}
+
+		appRecord, found := engine.resolveAccessApp(appSpec, appByID, appByKey)
 		if !found {
 			if !engine.manage {
 				engine.log.Warn("access app missing but SYNC_MANAGED_ACCESS is false; skipping create", "app", app.Name)
@@ -95,7 +107,7 @@ func (engine *Engine) Reconcile(ctx context.Context, apps []model.AccessAppSpec)
 				engine.log.Info("would create access app", "app", app.Name)
 				continue
 			}
-			created, err := engine.api.CreateAccessApp(ctx, engine.buildAppInput(app, policyRefs, nil, tagging))
+			created, err := engine.api.CreateAccessApp(ctx, engine.buildAppInput(appSpec, policyRefs, nil, tagging))
 			if err != nil {
 				engine.log.Error("failed to create access app", "app", app.Name, "error", err)
 				continue
@@ -106,7 +118,7 @@ func (engine *Engine) Reconcile(ctx context.Context, apps []model.AccessAppSpec)
 		}
 
 		desiredAppIDs[appRecord.ID] = struct{}{}
-		input := engine.buildAppInput(app, policyRefs, appRecord.Tags, tagging)
+		input := engine.buildAppInput(appSpec, policyRefs, appRecord.Tags, tagging)
 		if !engine.appNeedsUpdate(appRecord, input) {
 			engine.log.Debug("access app up-to-date", "app", app.Name)
 			continue
@@ -235,6 +247,33 @@ func (engine *Engine) updatePolicyIfNeeded(ctx context.Context, app model.Access
 	}
 }
 
+func (engine *Engine) ensureAppTags(ctx context.Context, app model.AccessAppSpec) ([]string, bool) {
+	if len(app.Tags) == 0 {
+		return app.Tags, true
+	}
+
+	seen := map[string]struct{}{}
+	ensured := make([]string, 0, len(app.Tags))
+	ok := true
+	for _, tag := range app.Tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		if err := engine.api.EnsureAccessTag(ctx, trimmed); err != nil {
+			engine.log.Warn("failed to ensure access tag for app", "app", app.Name, "tag", trimmed, "error", err)
+			ok = false
+			continue
+		}
+		ensured = append(ensured, trimmed)
+	}
+	return ensured, ok
+}
+
 func (engine *Engine) resolveAccessApp(spec model.AccessAppSpec, appByID map[string]cloudflare.AccessAppRecord, appByKey map[accessAppKey][]cloudflare.AccessAppRecord) (cloudflare.AccessAppRecord, bool) {
 	if spec.ID != "" {
 		record, ok := appByID[spec.ID]
@@ -274,8 +313,11 @@ func (engine *Engine) buildPolicyInput(spec model.AccessPolicySpec) cloudflare.A
 
 func (engine *Engine) buildAppInput(spec model.AccessAppSpec, policyRefs []cloudflare.AccessPolicyRef, existingTags []string, tagging bool) cloudflare.AccessAppInput {
 	tags := existingTags
+	if spec.TagsSet {
+		tags = spec.Tags
+	}
 	if tagging {
-		tags = mergeTags(existingTags, engine.managedTag)
+		tags = mergeTags(tags, engine.managedTag)
 	}
 
 	return cloudflare.AccessAppInput{

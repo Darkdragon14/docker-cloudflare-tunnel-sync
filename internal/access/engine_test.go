@@ -130,6 +130,56 @@ func TestReconcileSkipsCreateWhenManageDisabled(t *testing.T) {
 	}
 }
 
+func TestReconcileEnsuresAccessTags(t *testing.T) {
+	api := &stubAccessAPI{
+		listApps: []cloudflare.AccessAppRecord{
+			{ID: "app-1", Name: "app", Domain: "app.example.com"},
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
+	engine := NewEngine(api, logger, false, true, testManagedBy)
+
+	apps := []model.AccessAppSpec{
+		{
+			Name:    "app",
+			Domain:  "app.example.com",
+			Tags:    []string{"team", "internal"},
+			TagsSet: true,
+			Policies: []model.AccessPolicySpec{
+				{ID: "policy-1", Managed: false},
+			},
+		},
+	}
+
+	if err := engine.Reconcile(context.Background(), apps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := []string{"team", "internal", model.AccessManagedTag(testManagedBy)}
+	if !stringSetsEqual(api.ensureTagNames, expected) {
+		t.Fatalf("unexpected ensured tags: %+v", api.ensureTagNames)
+	}
+}
+
+func TestBuildAppInputUsesExplicitTags(t *testing.T) {
+	api := &stubAccessAPI{}
+	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
+	engine := NewEngine(api, logger, false, true, testManagedBy)
+
+	spec := model.AccessAppSpec{
+		Name:    "app",
+		Domain:  "app.example.com",
+		Tags:    []string{"team", "internal"},
+		TagsSet: true,
+	}
+
+	input := engine.buildAppInput(spec, nil, []string{"legacy"}, true)
+	expected := []string{"team", "internal", model.AccessManagedTag(testManagedBy)}
+	if !stringSetsEqual(input.Tags, expected) {
+		t.Fatalf("unexpected tags: %+v", input.Tags)
+	}
+}
+
 func TestDeleteOrphanedAppsDeletesManaged(t *testing.T) {
 	api := &stubAccessAPI{}
 	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
@@ -163,6 +213,8 @@ type stubAccessAPI struct {
 	createPolicyCalls int
 	updatePolicyCalls int
 	ensureTagCalls    int
+	ensureTagNames    []string
+	ensureTagErrors   map[string]error
 }
 
 func (api *stubAccessAPI) ListAccessApps(ctx context.Context) ([]cloudflare.AccessAppRecord, error) {
@@ -200,5 +252,11 @@ func (api *stubAccessAPI) UpdateAccessPolicy(ctx context.Context, id string, inp
 
 func (api *stubAccessAPI) EnsureAccessTag(ctx context.Context, name string) error {
 	api.ensureTagCalls++
+	api.ensureTagNames = append(api.ensureTagNames, name)
+	if api.ensureTagErrors != nil {
+		if err, ok := api.ensureTagErrors[name]; ok {
+			return err
+		}
+	}
 	return nil
 }

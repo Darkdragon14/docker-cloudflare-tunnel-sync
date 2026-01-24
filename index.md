@@ -4,7 +4,8 @@
 
 _No dashboard drift. Containers are the source of truth._
 
-The controller reconciles Docker labels into Cloudflare Tunnel ingress, DNS, and Access resources.
+Expose your Docker services through Cloudflare Tunnel using labels — and nothing else.
+Add a label, get a route. Remove the container, the route disappears. Cloudflare stays clean and in sync automatically.
 
 > **Disclaimer:** Use a dedicated Cloudflare Tunnel for this controller. If you attach it to an existing tunnel that already has published application routes, enabling managed sync can delete those routes.
 

@@ -22,6 +22,7 @@ const (
 	AccessLabelAppName      = AccessLabelPrefix + "app.name"
 	AccessLabelAppDomain    = AccessLabelPrefix + "app.domain"
 	AccessLabelAppID        = AccessLabelPrefix + "app.id"
+	AccessLabelAppTags      = AccessLabelPrefix + "app.tags"
 	AccessLabelPolicyPrefix = AccessLabelPrefix + "policy."
 )
 
@@ -126,6 +127,11 @@ func (parser *Parser) ParseAccessContainers(containers []docker.ContainerInfo) (
 		appName := strings.TrimSpace(container.Labels[AccessLabelAppName])
 		appDomain := strings.TrimSpace(container.Labels[AccessLabelAppDomain])
 		appID := strings.TrimSpace(container.Labels[AccessLabelAppID])
+		appTagsValue, hasAppTags := container.Labels[AccessLabelAppTags]
+		appTags := []string(nil)
+		if hasAppTags {
+			appTags = splitCommaList(appTagsValue)
+		}
 
 		if appName == "" {
 			errors = append(errors, fmt.Errorf("container %s: missing required %s label", container.Name, AccessLabelAppName))
@@ -159,6 +165,8 @@ func (parser *Parser) ParseAccessContainers(containers []docker.ContainerInfo) (
 			Name:     appName,
 			Domain:   appDomain,
 			Policies: policies,
+			Tags:     appTags,
+			TagsSet:  hasAppTags,
 			Source:   source,
 		}
 	}

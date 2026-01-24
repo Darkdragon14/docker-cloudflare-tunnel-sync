@@ -128,6 +128,7 @@ func TestParseAccessContainers(t *testing.T) {
 				AccessLabelEnable:                            "true",
 				AccessLabelAppName:                           "internal",
 				AccessLabelAppDomain:                         "internal.example.com",
+				AccessLabelAppTags:                           "team,internal",
 				AccessLabelPolicyPrefix + "1.name":           "employees",
 				AccessLabelPolicyPrefix + "1.action":         "allow",
 				AccessLabelPolicyPrefix + "1.include.emails": "a@example.com,b@example.com",
@@ -145,6 +146,12 @@ func TestParseAccessContainers(t *testing.T) {
 	app := apps[0]
 	if app.Name != "internal" || app.Domain != "internal.example.com" {
 		t.Fatalf("unexpected app details: %+v", app)
+	}
+	if !app.TagsSet {
+		t.Fatalf("expected app tags to be set")
+	}
+	if len(app.Tags) != 2 || app.Tags[0] != "team" || app.Tags[1] != "internal" {
+		t.Fatalf("unexpected app tags: %+v", app.Tags)
 	}
 	if len(app.Policies) != 1 {
 		t.Fatalf("expected 1 policy, got %d", len(app.Policies))

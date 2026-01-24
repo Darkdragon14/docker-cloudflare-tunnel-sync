@@ -2,7 +2,8 @@
 
 [![Release](https://img.shields.io/github/v/release/Darkdragon14/docker-cloudflare-tunnel-sync?sort=semver)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/releases/latest) [![Tests](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/tests.yml) [![Container](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/ghcr.yml/badge.svg?branch=main)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/ghcr.yml)
 
-Automatically reconcile Cloudflare Tunnel ingress routes from Docker container labels. Containers opt in via explicit, namespaced labels and remain the single source of truth for route definitions.
+Expose your Docker services through Cloudflare Tunnel using labels — and nothing else.
+Add a label, get a route. Remove the container, the route disappears. Cloudflare stays clean and in sync automatically.
 
 > **Disclaimer:** Use a dedicated Cloudflare Tunnel for this controller. If you attach it to an existing tunnel that already has published application routes, enabling managed sync can delete those routes.
 
@@ -57,6 +58,10 @@ services:
       cloudflare.tunnel.enable: "true"
       cloudflare.tunnel.hostname: nginx.example.com
       cloudflare.tunnel.service: http://nginx:80
+      cloudflare.access.enable: "true"
+      cloudflare.access.app.name: nginx
+      cloudflare.access.app.tags: "team,internal"
+      cloudflare.access.policy.1.name: existing-policy-name
 ```
 
 ## Configuration
@@ -94,7 +99,7 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 
 ### Access labels
 
-Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails and IPs. If only `policy.N.id` or `policy.N.name` is provided, the policy is referenced without updates. If `cloudflare.access.app.domain` is omitted, the controller uses `cloudflare.tunnel.hostname`.
+Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails, IPs, and tags. If only `policy.N.id` or `policy.N.name` is provided, the policy is referenced without updates. If `cloudflare.access.app.domain` is omitted, the controller uses `cloudflare.tunnel.hostname`. When `cloudflare.access.app.tags` is set, the controller ensures those tags exist (creating them if needed) and manages app tags to match that list (plus the managed-by tag when `SYNC_MANAGED_ACCESS=true`); if omitted, existing tags are preserved.
 
 | Label | Required | Example | Description |
 | --- | --- | --- | --- |
@@ -102,6 +107,7 @@ Access applications are only managed when `cloudflare.access.enable=true`. Polic
 | `cloudflare.access.app.name` | yes | `nginx` | Access application name. |
 | `cloudflare.access.app.domain` | yes* | `nginx.example.com` | Access application domain (required unless `cloudflare.tunnel.hostname` is set). |
 | `cloudflare.access.app.id` | no | `app-uuid` | Optional existing app ID to update. |
+| `cloudflare.access.app.tags` | no | `team,internal` | Comma-separated Access app tags; when set, missing tags are created and the list is enforced. |
 | `cloudflare.access.policy.1.name` | yes* | `allow-team` | Policy name (required unless using ID-only reference; if set without other policy fields, the policy is referenced by name). |
 | `cloudflare.access.policy.1.action` | yes* | `allow` | Policy action (`allow` or `deny`, required unless using reference-only mode). |
 | `cloudflare.access.policy.1.include.emails` | no | `me@example.com` | Comma-separated allowed emails. |
