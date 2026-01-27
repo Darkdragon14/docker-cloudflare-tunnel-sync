@@ -2,16 +2,83 @@
 
 [![Release](https://img.shields.io/github/v/release/Darkdragon14/docker-cloudflare-tunnel-sync?sort=semver)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/releases/latest) [![Tests](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/tests.yml) [![Container](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/ghcr.yml/badge.svg?branch=main)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/ghcr.yml)
 
-Expose your Docker services through Cloudflare Tunnel using labels — and nothing else.
-Add a label, get a route. Remove the container, the route disappears. Cloudflare stays clean and in sync automatically.
+> Turn Docker labels into Cloudflare Tunnel routes, DNS records, and Access rules.
+
+Stop managing Cloudflare dashboards by hand.  
+Let your containers be the source of truth.
 
 > **Disclaimer:** Use a dedicated Cloudflare Tunnel for this controller. If you attach it to an existing tunnel that already has published application routes, enabling managed sync can delete those routes.
 
-## Quickstart
+---
 
-1. Create or identify a Cloudflare Tunnel and API token.
-2. Start the controller with a read-only Docker socket mount.
-3. Add labels to containers you want exposed via the tunnel.
+## ✨ Why this exists
+
+Managing Cloudflare Tunnel routes manually does not scale.
+
+- Routes drift over time
+- Old services stay exposed
+- Access rules become outdated
+- Documentation gets ignored
+
+This project solves that by syncing Cloudflare configuration directly from Docker container labels.
+
+If a container exists → it is exposed.  
+If it disappears → Cloudflare is cleaned up.
+
+No manual work. No drift.
+
+---
+
+## 🚀 What it does
+
+`docker-cloudflare-tunnel-sync` continuously reconciles:
+
+- ✅ Tunnel ingress rules
+- ✅ DNS records
+- ✅ Cloudflare Access applications & policies (optional)
+
+from Docker labels.
+
+Docker becomes your single source of truth.
+
+---
+
+## 🧩 How it works
+
+```mermaid
+flowchart LR
+  A[Docker labels] --> B[docker-cloudflare-tunnel-sync]
+  B --> C[Cloudflare Tunnel]
+  B --> D[Cloudflare DNS]
+  B --> E[Cloudflare Access]
+```
+
+1. The controller watches Docker events
+2. Reads container labels
+3. Translates them into Cloudflare resources
+4. Reconciles differences
+5. Removes stale config automatically
+
+---
+
+## 📦 Quickstart
+
+### 1. Create a Cloudflare API token
+
+Required permissions:
+
+| Scope | Resource | Access |
+|----------|-------------|---------|
+| Account | Cloudflare Tunnel | Edit |
+| Account | Access: Apps and Policies | Edit |
+| Zone | Zone | Read |
+| Zone | DNS | Edit |
+
+> ⚠️ Do not use a Global API Key. Always use a scoped token with the minimum required permissions.
+
+---
+
+### 2. Run the controller
 
 Pull the image:
 
@@ -19,9 +86,9 @@ Pull the image:
 docker pull ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
 ```
 
-Run with Docker (read-only socket mount):
+Run with Docker:
 
-```
+```bash
 docker run --rm \
   -e CF_API_TOKEN=your-token \
   -e CF_ACCOUNT_ID=your-account-id \
@@ -35,36 +102,29 @@ docker run --rm \
   ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
 ```
 
-Docker Compose quickstart (controller + nginx):
+> ⚠️ The Docker socket is mounted read-only for safety.
 
-```
+---
+
+### 3. Label your containers
+
+Example:
+
+```yaml
 services:
-  tunnel-sync:
-    image: ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
-    environment:
-      CF_API_TOKEN: your-token
-      CF_ACCOUNT_ID: your-account-id
-      CF_TUNNEL_ID: your-tunnel-id
-      SYNC_MANAGED_TUNNEL: "true"
-      SYNC_MANAGED_ACCESS: "true"
-      SYNC_MANAGED_DNS: "true"
-      SYNC_DELETE_DNS: "true"
-      SYNC_POLL_INTERVAL: 30s
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-  nginx:
-    image: nginx:latest
+  app:
+    image: nginx
     labels:
       cloudflare.tunnel.enable: "true"
-      cloudflare.tunnel.hostname: nginx.example.com
-      cloudflare.tunnel.service: http://nginx:80
-      cloudflare.access.enable: "true"
-      cloudflare.access.app.name: nginx
-      cloudflare.access.app.tags: "team,internal"
-      cloudflare.access.policy.1.name: existing-policy-name
+      cloudflare.tunnel.hostname: app.example.com
+      cloudflare.tunnel.service: http://app:80
 ```
 
-## Configuration
+Start the container — it is automatically exposed.
+
+---
+
+## ⚙️ Configuration
 
 ### Environment variables
 
@@ -86,7 +146,9 @@ services:
 | `SYNC_MANAGED_BY` | no | `docker-cf-tunnel-sync` | Override the managed-by tag/comment value (used for Access tags and DNS comments). |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 
-### Docker labels
+---
+
+### Labels
 
 All labels are explicit and namespaced. A container is only managed when `cloudflare.tunnel.enable=true`.
 
@@ -116,9 +178,65 @@ Access applications are only managed when `cloudflare.access.enable=true`. Polic
 
 When no app or policy ID is provided, the controller matches existing resources by name (and domain for apps); if multiple matches exist, reconciliation is skipped with a warning. Name-only policy references must match an existing policy. If a policy ID is provided but not found in account-level policies, the controller will still attach the ID (useful for app-scoped policies).
 
-## Contributing
 
-- Open an issue to discuss changes or report bugs.
-- Keep labels explicit and namespaced; avoid hidden defaults.
-- Build locally with `docker build -t docker-cloudflare-tunnel-sync:local .`.
-- Format Go files with `gofmt` and run `go test ./...` (Go 1.24+).
+---
+
+## 🔐 Security model
+
+This project never exposes services by default.
+
+Only containers with explicit labels are managed.
+
+### Docker socket
+
+- Mounted read-only
+- Used only to read metadata
+- No container control
+
+### Cloudflare token
+
+Use scoped tokens.
+
+Do **not** use global API keys.
+
+---
+
+## 🛟 Safe mode
+
+When enabled, the controller:
+
+- Never deletes existing Cloudflare resources
+- Only logs planned changes
+
+Useful for:
+
+- First deployment
+- Testing
+- Production audits
+
+```bash
+-e SYNC_DRY_RUN=true
+```
+
+---
+
+## 🗺️ Roadmap
+
+Planned improvements:
+
+- [ ] Label validation
+- [ ] Web UI (optional)
+
+---
+
+## 🤝 Contributing
+
+PRs and issues are welcome.
+
+If you plan major changes, please open a discussion first.
+
+---
+
+## 📄 License
+
+MIT
