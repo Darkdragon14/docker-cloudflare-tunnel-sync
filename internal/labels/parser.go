@@ -11,11 +11,13 @@ import (
 )
 
 const (
-	LabelPrefix  = "cloudflare.tunnel."
-	LabelEnable  = LabelPrefix + "enable"
-	LabelHost    = LabelPrefix + "hostname"
-	LabelPath    = LabelPrefix + "path"
-	LabelService = LabelPrefix + "service"
+	LabelPrefix            = "cloudflare.tunnel."
+	LabelEnable            = LabelPrefix + "enable"
+	LabelHost              = LabelPrefix + "hostname"
+	LabelPath              = LabelPrefix + "path"
+	LabelService           = LabelPrefix + "service"
+	LabelOriginServerName  = LabelPrefix + "origin.server-name"
+	LabelOriginNoTLSVerify = LabelPrefix + "origin.no-tls-verify"
 
 	AccessLabelPrefix       = "cloudflare.access."
 	AccessLabelEnable       = AccessLabelPrefix + "enable"
@@ -60,6 +62,8 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 		hostname := strings.TrimSpace(container.Labels[LabelHost])
 		service := strings.TrimSpace(container.Labels[LabelService])
 		path := strings.TrimSpace(container.Labels[LabelPath])
+		originServerNameValue, hasOriginServerName := container.Labels[LabelOriginServerName]
+		originNoTLSVerifyValue, hasOriginNoTLSVerify := container.Labels[LabelOriginNoTLSVerify]
 
 		if hostname == "" {
 			errors = append(errors, fmt.Errorf("container %s: missing required %s label", container.Name, LabelHost))
@@ -74,6 +78,26 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 			continue
 		}
 
+		var originServerName *string
+		if hasOriginServerName {
+			trimmedServerName := strings.TrimSpace(originServerNameValue)
+			if trimmedServerName == "" {
+				errors = append(errors, fmt.Errorf("container %s: %s cannot be empty", container.Name, LabelOriginServerName))
+				continue
+			}
+			originServerName = &trimmedServerName
+		}
+
+		var originNoTLSVerify *bool
+		if hasOriginNoTLSVerify {
+			parsedNoTLSVerify, err := strconv.ParseBool(strings.TrimSpace(originNoTLSVerifyValue))
+			if err != nil {
+				errors = append(errors, fmt.Errorf("container %s: invalid %s label: %w", container.Name, LabelOriginNoTLSVerify, err))
+				continue
+			}
+			originNoTLSVerify = &parsedNoTLSVerify
+		}
+
 		key := model.RouteKey{Hostname: hostname, Path: path}
 		if _, exists := desired[key]; exists {
 			errors = append(errors, fmt.Errorf("duplicate route definition for %s", key.String()))
@@ -82,9 +106,11 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 
 		source := model.SourceRef{ContainerID: container.ID, ContainerName: container.Name}
 		desired[key] = model.RouteSpec{
-			Key:     key,
-			Service: service,
-			Source:  source,
+			Key:              key,
+			Service:          service,
+			OriginServerName: originServerName,
+			NoTLSVerify:      originNoTLSVerify,
+			Source:           source,
 		}
 	}
 
