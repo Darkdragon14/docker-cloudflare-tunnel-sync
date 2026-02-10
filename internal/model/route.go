@@ -23,7 +23,9 @@ type SourceRef struct {
 
 // RouteSpec describes the desired ingress rule state derived from Docker labels.
 type RouteSpec struct {
-	Key     RouteKey
-	Service string
-	Source  SourceRef
+	Key              RouteKey
+	Service          string
+	OriginServerName *string
+	NoTLSVerify      *bool
+	Source           SourceRef
 }

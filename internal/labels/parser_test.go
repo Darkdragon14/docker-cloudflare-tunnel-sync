@@ -55,6 +55,77 @@ func TestParseContainers(t *testing.T) {
 	}
 }
 
+func TestParseContainersWithOriginLabels(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "with-origin",
+			Labels: map[string]string{
+				LabelEnable:            "true",
+				LabelHost:              "app.example.com",
+				LabelService:           "https://app:443",
+				LabelOriginServerName:  "app.internal",
+				LabelOriginNoTLSVerify: "true",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	route := routes[0]
+	if route.OriginServerName == nil || *route.OriginServerName != "app.internal" {
+		t.Fatalf("expected origin server name to be app.internal, got %+v", route.OriginServerName)
+	}
+	if route.NoTLSVerify == nil || !*route.NoTLSVerify {
+		t.Fatalf("expected no TLS verify to be true, got %+v", route.NoTLSVerify)
+	}
+}
+
+func TestParseContainersOriginLabelsValidationErrors(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "empty-origin-server-name",
+			Labels: map[string]string{
+				LabelEnable:           "true",
+				LabelHost:             "app.example.com",
+				LabelService:          "https://app:443",
+				LabelOriginServerName: " ",
+			},
+		},
+		{
+			ID:   "2",
+			Name: "bad-no-tls-verify",
+			Labels: map[string]string{
+				LabelEnable:            "true",
+				LabelHost:              "app2.example.com",
+				LabelService:           "https://app2:443",
+				LabelOriginNoTLSVerify: "notabool",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(routes) != 0 {
+		t.Fatalf("expected no routes, got %d", len(routes))
+	}
+	if len(errs) != 2 {
+		t.Fatalf("expected 2 errors, got %d: %v", len(errs), errs)
+	}
+	messages := []string{errs[0].Error(), errs[1].Error()}
+	assertContains(t, messages, LabelOriginServerName+" cannot be empty")
+	assertContains(t, messages, "invalid "+LabelOriginNoTLSVerify+" label")
+}
+
 func TestParseContainersValidationErrors(t *testing.T) {
 	parser := NewParser()
 

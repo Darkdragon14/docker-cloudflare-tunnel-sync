@@ -3,6 +3,7 @@ package reconcile
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"sort"
 
 	"log/slog"
@@ -82,13 +83,16 @@ func (engine *Engine) buildDesiredIngress(desired []model.RouteSpec, existing []
 	desiredRules := make([]cloudflare.IngressRule, 0, len(desired)+1)
 	desiredKeys := make(map[model.RouteKey]struct{}, len(desired))
 	for _, route := range desired {
-		rule := cloudflare.IngressRule{
-			Hostname: route.Key.Hostname,
-			Path:     route.Key.Path,
-			Service:  route.Service,
-		}
+		var existingOriginRequest json.RawMessage
 		if existingRule, ok := existingByKey[route.Key]; ok {
-			rule.OriginRequest = existingRule.OriginRequest
+			existingOriginRequest = existingRule.OriginRequest
+		}
+
+		rule := cloudflare.IngressRule{
+			Hostname:      route.Key.Hostname,
+			Path:          route.Key.Path,
+			Service:       route.Service,
+			OriginRequest: mergeManagedOriginRequest(existingOriginRequest, route, engine.log),
 		}
 		desiredRules = append(desiredRules, rule)
 		desiredKeys[route.Key] = struct{}{}
@@ -136,4 +140,75 @@ func ingressEqual(left []cloudflare.IngressRule, right []cloudflare.IngressRule)
 
 func ingressRuleKey(rule cloudflare.IngressRule) string {
 	return model.RouteKey{Hostname: rule.Hostname, Path: rule.Path}.String()
+}
+
+func mergeManagedOriginRequest(existing json.RawMessage, route model.RouteSpec, logger *slog.Logger) json.RawMessage {
+	if len(existing) == 0 && route.OriginServerName == nil && route.NoTLSVerify == nil {
+		return nil
+	}
+
+	originRequest := map[string]any{}
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &originRequest); err != nil {
+			logger.Warn("existing originRequest is invalid JSON; rebuilding managed keys", "route", route.Key.String(), "error", err)
+			originRequest = map[string]any{}
+		}
+	}
+
+	changed := false
+	if route.OriginServerName != nil {
+		if current, ok := originRequest["originServerName"]; !ok || !originRequestStringEqual(current, *route.OriginServerName) {
+			originRequest["originServerName"] = *route.OriginServerName
+			changed = true
+		}
+	} else {
+		if _, ok := originRequest["originServerName"]; ok {
+			delete(originRequest, "originServerName")
+			changed = true
+		}
+	}
+
+	if route.NoTLSVerify != nil {
+		if current, ok := originRequest["noTLSVerify"]; !ok || !originRequestBoolEqual(current, *route.NoTLSVerify) {
+			originRequest["noTLSVerify"] = *route.NoTLSVerify
+			changed = true
+		}
+	} else {
+		if _, ok := originRequest["noTLSVerify"]; ok {
+			delete(originRequest, "noTLSVerify")
+			changed = true
+		}
+	}
+
+	if !changed {
+		if len(existing) == 0 {
+			return nil
+		}
+		return existing
+	}
+
+	if len(originRequest) == 0 {
+		return nil
+	}
+
+	merged, err := json.Marshal(originRequest)
+	if err != nil {
+		logger.Warn("failed to marshal managed originRequest", "route", route.Key.String(), "error", err)
+		if len(existing) == 0 {
+			return nil
+		}
+		return existing
+	}
+
+	return merged
+}
+
+func originRequestStringEqual(value any, expected string) bool {
+	stringValue, ok := value.(string)
+	return ok && stringValue == expected
+}
+
+func originRequestBoolEqual(value any, expected bool) bool {
+	boolValue, ok := value.(bool)
+	return ok && boolValue == expected
 }

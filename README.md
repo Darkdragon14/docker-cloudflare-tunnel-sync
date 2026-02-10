@@ -96,6 +96,10 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 | `cloudflare.tunnel.hostname` | yes | `app.example.com` | Hostname for the route. |
 | `cloudflare.tunnel.service` | yes | `http://api:8080` | Cloudflare service/origin URL. |
 | `cloudflare.tunnel.path` | no | `/api` | Optional path prefix (must start with `/`). |
+| `cloudflare.tunnel.origin.server-name` | no | `app.internal` | Sets `originRequest.originServerName` (TLS SNI override) for the route. |
+| `cloudflare.tunnel.origin.no-tls-verify` | no | `true` | Sets `originRequest.noTLSVerify` for the route (`true`/`false`). |
+
+When either origin label is omitted, the corresponding `originRequest` key is removed during reconciliation. Unmanaged `originRequest` keys are preserved.
 
 ### Access labels
 
