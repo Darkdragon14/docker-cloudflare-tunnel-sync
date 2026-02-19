@@ -93,6 +93,37 @@ func TestBuildDesiredIngressAppliesOriginLabels(t *testing.T) {
 	}
 }
 
+func TestBuildDesiredIngressPreservesDesiredOrder(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
+	engine := NewEngine(nil, logger, false, true)
+
+	desired := []model.RouteSpec{
+		{Key: model.RouteKey{Hostname: "soulsync.example.com"}, Service: "http://soulsync:8008"},
+		{Key: model.RouteKey{Hostname: "soulsync-spotify.example.com"}, Service: "http://soulsync:8888"},
+		{Key: model.RouteKey{Hostname: "soulsync-tidal.example.com"}, Service: "http://soulsync:8889"},
+	}
+
+	desiredIngress, removed := engine.buildDesiredIngress(desired, nil)
+	if len(removed) != 0 {
+		t.Fatalf("expected no removed rules, got %d", len(removed))
+	}
+	if len(desiredIngress) != 4 {
+		t.Fatalf("expected 4 desired rules including fallback, got %d", len(desiredIngress))
+	}
+	if desiredIngress[0].Hostname != "soulsync.example.com" {
+		t.Fatalf("expected base route first, got %+v", desiredIngress[0])
+	}
+	if desiredIngress[1].Hostname != "soulsync-spotify.example.com" {
+		t.Fatalf("expected spotify route second, got %+v", desiredIngress[1])
+	}
+	if desiredIngress[2].Hostname != "soulsync-tidal.example.com" {
+		t.Fatalf("expected tidal route third, got %+v", desiredIngress[2])
+	}
+	if desiredIngress[3].Service != model.FallbackService {
+		t.Fatalf("expected fallback rule last")
+	}
+}
+
 func TestIngressEqual(t *testing.T) {
 	ruleA := cloudflare.IngressRule{Hostname: "a.example.com", Service: "http://a"}
 	ruleB := cloudflare.IngressRule{Hostname: "a.example.com", Service: "http://a", OriginRequest: []byte(`{"noTLSVerify":true}`)}

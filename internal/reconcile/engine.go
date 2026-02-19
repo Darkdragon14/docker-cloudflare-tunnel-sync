@@ -98,10 +98,6 @@ func (engine *Engine) buildDesiredIngress(desired []model.RouteSpec, existing []
 		desiredKeys[route.Key] = struct{}{}
 	}
 
-	sort.Slice(desiredRules, func(i, j int) bool {
-		return ingressRuleKey(desiredRules[i]) < ingressRuleKey(desiredRules[j])
-	})
-
 	removed := make([]cloudflare.IngressRule, 0)
 	for key, rule := range existingByKey {
 		if _, wanted := desiredKeys[key]; !wanted {

@@ -88,6 +88,163 @@ func TestParseContainersWithOriginLabels(t *testing.T) {
 	}
 }
 
+func TestParseContainersWithSuffixRoutes(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "soulsync",
+			Labels: map[string]string{
+				LabelEnable:                         "true",
+				LabelHost:                           "soulsync.example.com",
+				LabelService:                        "http://soulsync:8008",
+				LabelHost + ".spotify":              "soulsync-spotify.example.com",
+				LabelService + ".spotify":           "http://soulsync:8888",
+				LabelPath + ".spotify":              "/spotify",
+				LabelHost + ".tidal":                "soulsync-tidal.example.com",
+				LabelService + ".tidal":             "http://soulsync:8889",
+				LabelPath + ".tidal":                "/tidal",
+				LabelOriginServerName + ".tidal":    "tidal.internal",
+				LabelOriginNoTLSVerify + ".tidal":   "true",
+				LabelOriginNoTLSVerify + ".spotify": "false",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+	if len(routes) != 3 {
+		t.Fatalf("expected 3 routes, got %d", len(routes))
+	}
+
+	if got := routes[0].Key.String(); got != "soulsync.example.com" {
+		t.Fatalf("expected base route first, got %s", got)
+	}
+	if got := routes[1].Key.String(); got != "soulsync-spotify.example.com/spotify" {
+		t.Fatalf("expected spotify route second, got %s", got)
+	}
+	if got := routes[2].Key.String(); got != "soulsync-tidal.example.com/tidal" {
+		t.Fatalf("expected tidal route third, got %s", got)
+	}
+
+	if routes[1].NoTLSVerify == nil || *routes[1].NoTLSVerify {
+		t.Fatalf("expected spotify no TLS verify to be false, got %+v", routes[1].NoTLSVerify)
+	}
+	if routes[2].OriginServerName == nil || *routes[2].OriginServerName != "tidal.internal" {
+		t.Fatalf("expected tidal origin server name to be tidal.internal, got %+v", routes[2].OriginServerName)
+	}
+	if routes[2].NoTLSVerify == nil || !*routes[2].NoTLSVerify {
+		t.Fatalf("expected tidal no TLS verify to be true, got %+v", routes[2].NoTLSVerify)
+	}
+}
+
+func TestParseContainersMissingSuffixService(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "missing-suffix-service",
+			Labels: map[string]string{
+				LabelEnable:            "true",
+				LabelHost:              "app.example.com",
+				LabelService:           "http://app:8000",
+				LabelHost + ".spotify": "spotify.example.com",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	assertContains(t, []string{errs[0].Error()}, LabelHost+".spotify is set without matching "+LabelService+".spotify")
+}
+
+func TestParseContainersMissingSuffixHostname(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "missing-suffix-hostname",
+			Labels: map[string]string{
+				LabelEnable:               "true",
+				LabelHost:                 "app.example.com",
+				LabelService:              "http://app:8000",
+				LabelService + ".spotify": "http://spotify:9000",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	assertContains(t, []string{errs[0].Error()}, LabelService+".spotify is set without matching "+LabelHost+".spotify")
+}
+
+func TestParseContainersMixedSuffixValidation(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "mixed-suffixes",
+			Labels: map[string]string{
+				LabelEnable:                       "true",
+				LabelHost:                         "soulsync.example.com",
+				LabelService:                      "http://soulsync:8008",
+				LabelHost + ".spotify":            "soulsync-spotify.example.com",
+				LabelService + ".spotify":         "http://soulsync:8888",
+				LabelPath + ".spotify":            "/spotify",
+				LabelHost + ".apple":              "soulsync-apple.example.com",
+				LabelService + ".deezer":          "http://soulsync:8890",
+				LabelHost + ".tidal":              "soulsync-tidal.example.com",
+				LabelService + ".tidal":           "http://soulsync:8889",
+				LabelPath + ".tidal":              "tidal",
+				LabelHost + ".qobuz":              "soulsync-qobuz.example.com",
+				LabelService + ".qobuz":           "http://soulsync:8891",
+				LabelOriginNoTLSVerify + ".qobuz": "notabool",
+				LabelHost + ".":                   "ignored-empty-suffix.example.com",
+				LabelService + ".":                "http://ignored:9999",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 valid routes, got %d", len(routes))
+	}
+	if got := routes[0].Key.String(); got != "soulsync.example.com" {
+		t.Fatalf("expected base route first, got %s", got)
+	}
+	if got := routes[1].Key.String(); got != "soulsync-spotify.example.com/spotify" {
+		t.Fatalf("expected spotify route second, got %s", got)
+	}
+
+	if len(errs) != 4 {
+		t.Fatalf("expected 4 errors, got %d: %v", len(errs), errs)
+	}
+	messages := make([]string, 0, len(errs))
+	for _, err := range errs {
+		messages = append(messages, err.Error())
+	}
+	assertContains(t, messages, LabelHost+".apple is set without matching "+LabelService+".apple")
+	assertContains(t, messages, LabelService+".deezer is set without matching "+LabelHost+".deezer")
+	assertContains(t, messages, LabelPath+".tidal must start with '/'")
+	assertContains(t, messages, "invalid "+LabelOriginNoTLSVerify+".qobuz label")
+}
+
 func TestParseContainersOriginLabelsValidationErrors(t *testing.T) {
 	parser := NewParser()
 

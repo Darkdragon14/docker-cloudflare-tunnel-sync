@@ -155,13 +155,28 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 | Label | Required | Example | Description |
 | --- | --- | --- | --- |
 | `cloudflare.tunnel.enable` | yes | `true` | Opt-in flag for route creation. |
-| `cloudflare.tunnel.hostname` | yes | `app.example.com` | Hostname for the route. |
-| `cloudflare.tunnel.service` | yes | `http://api:8080` | Cloudflare service/origin URL. |
-| `cloudflare.tunnel.path` | no | `/api` | Optional path prefix (must start with `/`). |
-| `cloudflare.tunnel.origin.server-name` | no | `app.internal` | Sets `originRequest.originServerName` (TLS SNI override) for the route. |
-| `cloudflare.tunnel.origin.no-tls-verify` | no | `true` | Sets `originRequest.noTLSVerify` for the route (`true`/`false`). |
+| `cloudflare.tunnel.hostname` | yes | `app.example.com` | Base route hostname (required). |
+| `cloudflare.tunnel.service` | yes | `http://api:8080` | Base route service/origin URL (required). |
+| `cloudflare.tunnel.path` | no | `/api` | Optional base route path prefix (must start with `/`). |
+| `cloudflare.tunnel.origin.server-name` | no | `app.internal` | Optional base route `originRequest.originServerName` (TLS SNI override). |
+| `cloudflare.tunnel.origin.no-tls-verify` | no | `true` | Optional base route `originRequest.noTLSVerify` (`true`/`false`). |
 
-When either origin label is omitted, the corresponding `originRequest` key is removed during reconciliation. Unmanaged `originRequest` keys are preserved.
+> **Note - Additional routes by suffix**
+>
+> The base route labels `cloudflare.tunnel.hostname` and `cloudflare.tunnel.service` remain required for every managed container.
+>
+> You can define additional routes with suffix-based labels:
+> - `cloudflare.tunnel.hostname.<suffix>`
+> - `cloudflare.tunnel.service.<suffix>`
+> - `cloudflare.tunnel.path.<suffix>`
+> - `cloudflare.tunnel.origin.server-name.<suffix>`
+> - `cloudflare.tunnel.origin.no-tls-verify.<suffix>`
+>
+> A suffix route is created only when both `hostname.<suffix>` and `service.<suffix>` are set.
+> If one is missing, the controller logs a warning and skips that suffix.
+> Empty suffix labels (for example `cloudflare.tunnel.hostname.`) are ignored.
+
+When either origin label is omitted for a managed route, the corresponding `originRequest` key is removed during reconciliation. Unmanaged `originRequest` keys are preserved.
 
 ### Access labels
 
