@@ -38,7 +38,8 @@ func NewParser() *Parser {
 // ParseContainers returns desired tunnel ingress rules and any validation errors.
 func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]model.RouteSpec, []error) {
 	errors := []error{}
-	desired := make(map[model.RouteKey]model.RouteSpec)
+	desired := []model.RouteSpec{}
+	desiredKeys := map[model.RouteKey]struct{}{}
 
 	sorted := make([]docker.ContainerInfo, len(containers))
 	copy(sorted, containers)
@@ -62,8 +63,6 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 		hostname := strings.TrimSpace(container.Labels[LabelHost])
 		service := strings.TrimSpace(container.Labels[LabelService])
 		path := strings.TrimSpace(container.Labels[LabelPath])
-		originServerNameValue, hasOriginServerName := container.Labels[LabelOriginServerName]
-		originNoTLSVerifyValue, hasOriginNoTLSVerify := container.Labels[LabelOriginNoTLSVerify]
 
 		if hostname == "" {
 			errors = append(errors, fmt.Errorf("container %s: missing required %s label", container.Name, LabelHost))
@@ -78,52 +77,146 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 			continue
 		}
 
-		var originServerName *string
-		if hasOriginServerName {
-			trimmedServerName := strings.TrimSpace(originServerNameValue)
-			if trimmedServerName == "" {
-				errors = append(errors, fmt.Errorf("container %s: %s cannot be empty", container.Name, LabelOriginServerName))
-				continue
-			}
-			originServerName = &trimmedServerName
-		}
-
-		var originNoTLSVerify *bool
-		if hasOriginNoTLSVerify {
-			parsedNoTLSVerify, err := strconv.ParseBool(strings.TrimSpace(originNoTLSVerifyValue))
-			if err != nil {
-				errors = append(errors, fmt.Errorf("container %s: invalid %s label: %w", container.Name, LabelOriginNoTLSVerify, err))
-				continue
-			}
-			originNoTLSVerify = &parsedNoTLSVerify
-		}
-
-		key := model.RouteKey{Hostname: hostname, Path: path}
-		if _, exists := desired[key]; exists {
-			errors = append(errors, fmt.Errorf("duplicate route definition for %s", key.String()))
+		originServerName, originNoTLSVerify, err := parseOriginLabels(container.Name, container.Labels, LabelOriginServerName, LabelOriginNoTLSVerify)
+		if err != nil {
+			errors = append(errors, err)
 			continue
 		}
 
+		key := model.RouteKey{Hostname: hostname, Path: path}
 		source := model.SourceRef{ContainerID: container.ID, ContainerName: container.Name}
-		desired[key] = model.RouteSpec{
+		if err := appendRouteSpec(&desired, desiredKeys, model.RouteSpec{
 			Key:              key,
 			Service:          service,
 			OriginServerName: originServerName,
 			NoTLSVerify:      originNoTLSVerify,
 			Source:           source,
+		}); err != nil {
+			errors = append(errors, err)
+		}
+
+		hostSuffixes := collectSuffixes(container.Labels, LabelHost)
+		serviceSuffixes := collectSuffixes(container.Labels, LabelService)
+
+		hostSuffixList := sortedSuffixes(hostSuffixes)
+		for _, suffix := range hostSuffixList {
+			if _, ok := serviceSuffixes[suffix]; ok {
+				continue
+			}
+			errors = append(errors, fmt.Errorf("container %s: %s.%s is set without matching %s.%s; skipping", container.Name, LabelHost, suffix, LabelService, suffix))
+		}
+
+		serviceSuffixList := sortedSuffixes(serviceSuffixes)
+		for _, suffix := range serviceSuffixList {
+			if _, ok := hostSuffixes[suffix]; ok {
+				continue
+			}
+			errors = append(errors, fmt.Errorf("container %s: %s.%s is set without matching %s.%s; skipping", container.Name, LabelService, suffix, LabelHost, suffix))
+		}
+
+		for _, suffix := range hostSuffixList {
+			if _, ok := serviceSuffixes[suffix]; !ok {
+				continue
+			}
+
+			hostnameKey := LabelHost + "." + suffix
+			serviceKey := LabelService + "." + suffix
+			pathKey := LabelPath + "." + suffix
+			originServerNameKey := LabelOriginServerName + "." + suffix
+			originNoTLSVerifyKey := LabelOriginNoTLSVerify + "." + suffix
+
+			hostname := strings.TrimSpace(container.Labels[hostnameKey])
+			service := strings.TrimSpace(container.Labels[serviceKey])
+			path := strings.TrimSpace(container.Labels[pathKey])
+			if hostname == "" {
+				errors = append(errors, fmt.Errorf("container %s: %s cannot be empty; skipping", container.Name, hostnameKey))
+				continue
+			}
+			if service == "" {
+				errors = append(errors, fmt.Errorf("container %s: %s cannot be empty; skipping", container.Name, serviceKey))
+				continue
+			}
+			if path != "" && !strings.HasPrefix(path, "/") {
+				errors = append(errors, fmt.Errorf("container %s: %s must start with '/'; skipping", container.Name, pathKey))
+				continue
+			}
+
+			originServerName, originNoTLSVerify, err := parseOriginLabels(container.Name, container.Labels, originServerNameKey, originNoTLSVerifyKey)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("%w; skipping", err))
+				continue
+			}
+
+			key := model.RouteKey{Hostname: hostname, Path: path}
+			if err := appendRouteSpec(&desired, desiredKeys, model.RouteSpec{
+				Key:              key,
+				Service:          service,
+				OriginServerName: originServerName,
+				NoTLSVerify:      originNoTLSVerify,
+				Source:           source,
+			}); err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 
-	result := make([]model.RouteSpec, 0, len(desired))
-	for _, route := range desired {
-		result = append(result, route)
+	return desired, errors
+}
+
+func appendRouteSpec(desired *[]model.RouteSpec, desiredKeys map[model.RouteKey]struct{}, route model.RouteSpec) error {
+	if _, exists := desiredKeys[route.Key]; exists {
+		return fmt.Errorf("duplicate route definition for %s", route.Key.String())
+	}
+	desiredKeys[route.Key] = struct{}{}
+	*desired = append(*desired, route)
+	return nil
+}
+
+func collectSuffixes(labels map[string]string, baseLabel string) map[string]struct{} {
+	set := map[string]struct{}{}
+	prefix := baseLabel + "."
+	for labelKey := range labels {
+		if !strings.HasPrefix(labelKey, prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(labelKey, prefix)
+		if suffix == "" {
+			continue
+		}
+		set[suffix] = struct{}{}
+	}
+	return set
+}
+
+func sortedSuffixes(set map[string]struct{}) []string {
+	items := make([]string, 0, len(set))
+	for suffix := range set {
+		items = append(items, suffix)
+	}
+	sort.Strings(items)
+	return items
+}
+
+func parseOriginLabels(containerName string, labels map[string]string, serverNameLabel string, noTLSVerifyLabel string) (*string, *bool, error) {
+	var originServerName *string
+	if originServerNameValue, hasOriginServerName := labels[serverNameLabel]; hasOriginServerName {
+		trimmedServerName := strings.TrimSpace(originServerNameValue)
+		if trimmedServerName == "" {
+			return nil, nil, fmt.Errorf("container %s: %s cannot be empty", containerName, serverNameLabel)
+		}
+		originServerName = &trimmedServerName
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Key.String() < result[j].Key.String()
-	})
+	var originNoTLSVerify *bool
+	if originNoTLSVerifyValue, hasOriginNoTLSVerify := labels[noTLSVerifyLabel]; hasOriginNoTLSVerify {
+		parsedNoTLSVerify, err := strconv.ParseBool(strings.TrimSpace(originNoTLSVerifyValue))
+		if err != nil {
+			return nil, nil, fmt.Errorf("container %s: invalid %s label: %w", containerName, noTLSVerifyLabel, err)
+		}
+		originNoTLSVerify = &parsedNoTLSVerify
+	}
 
-	return result, errors
+	return originServerName, originNoTLSVerify, nil
 }
 
 // ParseAccessContainers returns desired Access apps and any validation errors.
