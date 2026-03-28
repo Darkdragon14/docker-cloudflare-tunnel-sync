@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,7 +42,7 @@ type ControllerConfig struct {
 	DeleteDNS    bool
 }
 
-// Load parses configuration from environment variables.
+// Load parses configuration from environment variables or Docker secrets.
 func Load() (Config, error) {
 	pollInterval := getEnvDefault("SYNC_POLL_INTERVAL", "30s")
 	parsedInterval, err := time.ParseDuration(pollInterval)
@@ -52,7 +54,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	dryRun, err := parseBoolEnv("SYNC_DRY_RUN", false)
+dryRun, err := parseBoolEnv("SYNC_DRY_RUN", false)
 	if err != nil {
 		return Config{}, err
 	}
@@ -80,15 +82,15 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	apiToken, err := requiredEnv("CF_API_TOKEN")
+	apiToken, err := loadSecret("CF_API_TOKEN")
 	if err != nil {
 		return Config{}, err
 	}
-	accountID, err := requiredEnv("CF_ACCOUNT_ID")
+	accountID, err := loadSecret("CF_ACCOUNT_ID")
 	if err != nil {
 		return Config{}, err
 	}
-	tunnelID, err := requiredEnv("CF_TUNNEL_ID")
+	tunnelID, err := loadSecret("CF_TUNNEL_ID")
 	if err != nil {
 		return Config{}, err
 	}
@@ -118,10 +120,26 @@ func Load() (Config, error) {
 	}, nil
 }
 
+// loadSecret attempts to load a value from Docker secrets file first, then environment variable.
+// Docker secrets are typically mounted at /run/secrets/<secret_name> inside containers.
+func loadSecret(key string) (string, error) {
+	// Try to read from Docker secrets file
+	secretPath := filepath.Join("/run/secrets", key)
+	if content, err := ioutil.ReadFile(secretPath); err == nil {
+		value := strings.TrimSpace(string(content))
+		if value != "" {
+			return value, nil
+		}
+	}
+
+	// Fall back to environment variable
+	return requiredEnv(key)
+}
+
 func requiredEnv(key string) (string, error) {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
-		return "", fmt.Errorf("missing required %s", key)
+		return "", fmt.Errorf("missing required %s (checked /run/secrets/%s and env var)", key, key)
 	}
 	return value, nil
 }
