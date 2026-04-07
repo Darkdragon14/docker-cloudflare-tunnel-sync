@@ -37,6 +37,7 @@ type ControllerConfig struct {
 	ManageTunnel bool
 	ManageAccess bool
 	ManageDNS    bool
+	DNSZones     []string
 	DeleteDNS    bool
 }
 
@@ -72,6 +73,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	dnsZones := parseDNSZonesEnv("SYNC_DNS_ZONES")
 
 	managedBy := strings.TrimSpace(os.Getenv("SYNC_MANAGED_BY"))
 
@@ -111,6 +113,7 @@ func Load() (Config, error) {
 			ManageTunnel: manageTunnel,
 			ManageAccess: manageAccess,
 			ManageDNS:    manageDNS,
+			DNSZones:     dnsZones,
 			DeleteDNS:    deleteDNS,
 		},
 		ManagedBy: managedBy,
@@ -132,6 +135,29 @@ func getEnvDefault(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func parseDNSZonesEnv(key string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return nil
+	}
+
+	seen := map[string]struct{}{}
+	zones := []string{}
+	for _, part := range strings.Split(value, ",") {
+		zone := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(part), "."))
+		if zone == "" {
+			continue
+		}
+		if _, ok := seen[zone]; ok {
+			continue
+		}
+		seen[zone] = struct{}{}
+		zones = append(zones, zone)
+	}
+
+	return zones
 }
 
 func parseBoolEnv(key string, fallback bool) (bool, error) {

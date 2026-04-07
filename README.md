@@ -142,7 +142,8 @@ Start the container — it is automatically exposed.
 | `SYNC_MANAGED_TUNNEL` | no | `false` | Allow this tool to overwrite the tunnel ingress configuration. |
 | `SYNC_MANAGED_ACCESS` | no | `false` | Allow this tool to create/update Access apps and policies. |
 | `SYNC_MANAGED_DNS` | no | `false` | Allow this tool to create/update DNS CNAME records for tunnel hostnames. |
-| `SYNC_DELETE_DNS` | no | `false` | Delete managed DNS records when hostnames are no longer labeled. |
+| `SYNC_DNS_ZONES` | no | - | Comma-separated DNS zones to keep scanning for orphan cleanup when `SYNC_DELETE_DNS=true`, even if no current labels resolve to those zones. |
+| `SYNC_DELETE_DNS` | no | `false` | Delete managed DNS records in zones selected from current labels plus any zones listed in `SYNC_DNS_ZONES`. This does not perform a full account-wide cleanup. |
 | `SYNC_MANAGED_BY` | no | `docker-cf-tunnel-sync` | Override the managed-by tag/comment value (used for Access tags and DNS comments). |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 
@@ -157,6 +158,7 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 | `cloudflare.tunnel.enable` | yes | `true` | Opt-in flag for route creation. |
 | `cloudflare.tunnel.hostname` | yes | `app.example.com` | Base route hostname (required). |
 | `cloudflare.tunnel.service` | yes | `http://api:8080` | Base route service/origin URL (required). |
+| `cloudflare.tunnel.dns.zone` | no | `dev.example.com` | Override automatic DNS zone selection for this route hostname. Useful when Cloudflare manages a delegated sub-zone. |
 | `cloudflare.tunnel.path` | no | `/api` | Optional base route path prefix (must start with `/`). |
 | `cloudflare.tunnel.origin.server-name` | no | `app.internal` | Optional base route `originRequest.originServerName` (TLS SNI override). |
 | `cloudflare.tunnel.origin.no-tls-verify` | no | `true` | Optional base route `originRequest.noTLSVerify` (`true`/`false`). |
@@ -168,6 +170,7 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 > You can define additional routes with suffix-based labels:
 > - `cloudflare.tunnel.hostname.<suffix>`
 > - `cloudflare.tunnel.service.<suffix>`
+> - `cloudflare.tunnel.dns.zone.<suffix>`
 > - `cloudflare.tunnel.path.<suffix>`
 > - `cloudflare.tunnel.origin.server-name.<suffix>`
 > - `cloudflare.tunnel.origin.no-tls-verify.<suffix>`
@@ -177,6 +180,20 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 > Empty suffix labels (for example `cloudflare.tunnel.hostname.`) are ignored.
 
 When either origin label is omitted for a managed route, the corresponding `originRequest` key is removed during reconciliation. Unmanaged `originRequest` keys are preserved.
+
+DNS sync derives the target zone automatically from each hostname using the effective eTLD+1. For example, `app.dev.example.com` defaults to `example.com`. Set `cloudflare.tunnel.dns.zone` (or `cloudflare.tunnel.dns.zone.<suffix>`) to target a more specific Cloudflare zone such as `dev.example.com`.
+
+The DNS engine only queries zones selected by these rules. When `SYNC_DELETE_DNS=true`, you can extend that scan scope with `SYNC_DNS_ZONES`. This is useful when an entire zone disappears from current labels but you still want the controller to delete old managed DNS records in that zone.
+
+Example:
+
+```bash
+-e SYNC_MANAGED_DNS=true \
+-e SYNC_DELETE_DNS=true \
+-e SYNC_DNS_ZONES=darkdragon.fr,cf.darkdragon.fr
+```
+
+`cloudflare.tunnel.dns.zone` selects the Cloudflare zone for a specific hostname. `SYNC_DNS_ZONES` is different: it only keeps whole zones in the cleanup scan set when deleting orphaned DNS records.
 
 ### Access labels
 

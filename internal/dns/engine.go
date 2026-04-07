@@ -10,6 +10,7 @@ import (
 
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/cloudflare"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/model"
+	"golang.org/x/net/publicsuffix"
 )
 
 const (
@@ -19,25 +20,37 @@ const (
 
 // Engine reconciles DNS records for tunnel hostnames.
 type Engine struct {
-	api            cloudflare.DNSAPI
-	log            *slog.Logger
-	dryRun         bool
-	manage         bool
-	delete         bool
-	tunnelID       string
-	managedComment string
+	api             cloudflare.DNSAPI
+	log             *slog.Logger
+	dryRun          bool
+	manage          bool
+	delete          bool
+	configuredZones []string
+	tunnelID        string
+	managedComment  string
 }
 
-func NewEngine(api cloudflare.DNSAPI, logger *slog.Logger, dryRun bool, manage bool, delete bool, tunnelID string, managedBy string) *Engine {
+func NewEngine(api cloudflare.DNSAPI, logger *slog.Logger, dryRun bool, manage bool, delete bool, configuredZones []string, tunnelID string, managedBy string) *Engine {
 	return &Engine{
-		api:            api,
-		log:            logger,
-		dryRun:         dryRun,
-		manage:         manage,
-		delete:         delete,
-		tunnelID:       tunnelID,
-		managedComment: model.DNSManagedComment(managedBy),
+		api:             api,
+		log:             logger,
+		dryRun:          dryRun,
+		manage:          manage,
+		delete:          delete,
+		configuredZones: append([]string(nil), configuredZones...),
+		tunnelID:        tunnelID,
+		managedComment:  model.DNSManagedComment(managedBy),
 	}
+}
+
+type zonePlan struct {
+	requiredZones   map[string]struct{}
+	hostnamesByZone map[string][]string
+}
+
+type hostnameZoneState struct {
+	explicitZones   map[string]struct{}
+	invalidExplicit bool
 }
 
 func (engine *Engine) Reconcile(ctx context.Context, routes []model.RouteSpec) error {
@@ -45,8 +58,10 @@ func (engine *Engine) Reconcile(ctx context.Context, routes []model.RouteSpec) e
 		return nil
 	}
 
-	hostnames := uniqueHostnames(routes)
-	if len(hostnames) == 0 && !engine.delete {
+	plan := buildZonePlan(routes, engine.log)
+	selectedZones := engine.selectedZones(plan)
+	if len(selectedZones) == 0 {
+		engine.log.Debug("no DNS zones selected from managed hostnames or configured cleanup zones; DNS sync skipped")
 		return nil
 	}
 
@@ -59,37 +74,50 @@ func (engine *Engine) Reconcile(ctx context.Context, routes []model.RouteSpec) e
 		return nil
 	}
 
-	orderedZones := orderZones(zones)
+	orderedZones := filterZones(zones, selectedZones, engine.log)
+	if len(orderedZones) == 0 {
+		engine.log.Warn("no matching Cloudflare zones found for managed hostnames or configured cleanup zones; DNS sync skipped")
+		return nil
+	}
+
 	for _, zone := range orderedZones {
-		knownHostnames := filterHostnamesForZone(hostnames, zone.Name)
+		zoneName := normalizeDNSName(zone.Name)
+		knownHostnames := append([]string(nil), plan.hostnamesByZone[zoneName]...)
+		if len(knownHostnames) == 0 && !engine.delete {
+			continue
+		}
+
 		byName := map[string]struct{}{}
 		for _, hostname := range knownHostnames {
 			byName[hostname] = struct{}{}
 		}
 
-		records, err := engine.api.ListDNSRecords(ctx, zone.ID, dnsRecordType, "")
-		if err != nil {
-			engine.log.Error("failed to list DNS records", "zone", zone.Name, "error", err)
-			continue
-		}
+		if engine.delete {
+			if len(knownHostnames) == 0 {
+				engine.log.Debug("scanning configured DNS zone for orphan cleanup", "zone", zone.Name)
+			}
 
-		for _, record := range records {
-			hostname := strings.ToLower(strings.TrimSuffix(record.Name, "."))
-			if _, ok := byName[hostname]; ok {
+			records, err := engine.api.ListDNSRecords(ctx, zone.ID, dnsRecordType, "")
+			if err != nil {
+				engine.log.Error("failed to list DNS records", "zone", zone.Name, "error", err)
 				continue
 			}
-			if !engine.delete {
-				continue
-			}
-			if record.Comment != engine.managedComment {
-				continue
-			}
-			engine.log.Warn("deleting managed DNS record no longer desired", "hostname", hostname, "zone", zone.Name)
-			if engine.dryRun {
-				continue
-			}
-			if err := engine.api.DeleteDNSRecord(ctx, zone.ID, record.ID); err != nil {
-				engine.log.Error("failed to delete DNS record", "hostname", hostname, "zone", zone.Name, "error", err)
+
+			for _, record := range records {
+				hostname := strings.ToLower(strings.TrimSuffix(record.Name, "."))
+				if _, ok := byName[hostname]; ok {
+					continue
+				}
+				if record.Comment != engine.managedComment {
+					continue
+				}
+				engine.log.Warn("deleting managed DNS record no longer desired", "hostname", hostname, "zone", zone.Name)
+				if engine.dryRun {
+					continue
+				}
+				if err := engine.api.DeleteDNSRecord(ctx, zone.ID, record.ID); err != nil {
+					engine.log.Error("failed to delete DNS record", "hostname", hostname, "zone", zone.Name, "error", err)
+				}
 			}
 		}
 
@@ -164,55 +192,177 @@ func (engine *Engine) isManagedRecord(record cloudflare.DNSRecord, desired cloud
 	return strings.EqualFold(record.Content, desired.Content)
 }
 
-func uniqueHostnames(routes []model.RouteSpec) []string {
-	seen := map[string]struct{}{}
-	items := make([]string, 0, len(routes))
-	for _, route := range routes {
-		host := strings.TrimSpace(route.Key.Hostname)
-		if host == "" {
-			continue
-		}
-		host = strings.ToLower(strings.TrimSuffix(host, "."))
-		if _, ok := seen[host]; ok {
-			continue
-		}
-		seen[host] = struct{}{}
-		items = append(items, host)
+func (engine *Engine) selectedZones(plan zonePlan) map[string]struct{} {
+	selected := map[string]struct{}{}
+	for zone := range plan.requiredZones {
+		selected[zone] = struct{}{}
 	}
-	sort.Strings(items)
-	return items
+	if !engine.delete {
+		return selected
+	}
+
+	for _, zone := range engine.configuredZones {
+		normalized := normalizeDNSName(zone)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := selected[normalized]; ok {
+			continue
+		}
+		engine.log.Debug("configured DNS cleanup zone selected", "zone", normalized)
+		selected[normalized] = struct{}{}
+	}
+
+	return selected
+}
+
+func buildZonePlan(routes []model.RouteSpec, logger *slog.Logger) zonePlan {
+	states := map[string]*hostnameZoneState{}
+
+	for _, route := range routes {
+		hostname := normalizeDNSName(route.Key.Hostname)
+		if hostname == "" {
+			continue
+		}
+
+		state, ok := states[hostname]
+		if !ok {
+			state = &hostnameZoneState{explicitZones: map[string]struct{}{}}
+			states[hostname] = state
+		}
+
+		if route.DNSZoneOverride == "" {
+			continue
+		}
+
+		zone := normalizeDNSName(route.DNSZoneOverride)
+		if zone == "" {
+			logger.Warn("configured DNS zone override is empty; skipping hostname", "hostname", hostname)
+			state.invalidExplicit = true
+			continue
+		}
+		if !hostnameMatchesZone(hostname, zone) {
+			logger.Warn("configured DNS zone override does not match hostname; skipping hostname", "hostname", hostname, "zone", zone)
+			state.invalidExplicit = true
+			continue
+		}
+
+		state.explicitZones[zone] = struct{}{}
+	}
+
+	plan := zonePlan{
+		requiredZones:   map[string]struct{}{},
+		hostnamesByZone: map[string][]string{},
+	}
+
+	for hostname, state := range states {
+		if state.invalidExplicit {
+			continue
+		}
+
+		zone, ok := selectZoneForHostname(hostname, state, logger)
+		if !ok {
+			continue
+		}
+
+		plan.requiredZones[zone] = struct{}{}
+		plan.hostnamesByZone[zone] = append(plan.hostnamesByZone[zone], hostname)
+	}
+
+	for zone := range plan.hostnamesByZone {
+		sort.Strings(plan.hostnamesByZone[zone])
+	}
+
+	return plan
 }
 
 func orderZones(zones []cloudflare.Zone) []cloudflare.Zone {
 	ordered := make([]cloudflare.Zone, len(zones))
 	copy(ordered, zones)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		return len(ordered[i].Name) > len(ordered[j].Name)
+		left := normalizeDNSName(ordered[i].Name)
+		right := normalizeDNSName(ordered[j].Name)
+		if len(left) == len(right) {
+			return left < right
+		}
+		return len(left) > len(right)
 	})
 	return ordered
 }
 
-func matchZone(hostname string, zones []cloudflare.Zone) (cloudflare.Zone, bool) {
-	lower := strings.ToLower(strings.TrimSuffix(hostname, "."))
+func filterZones(zones []cloudflare.Zone, requiredZones map[string]struct{}, logger *slog.Logger) []cloudflare.Zone {
+	filtered := make([]cloudflare.Zone, 0, len(requiredZones))
+	found := map[string]struct{}{}
+
 	for _, zone := range zones {
-		zoneName := strings.ToLower(strings.TrimSuffix(zone.Name, "."))
-		if lower == zoneName || strings.HasSuffix(lower, "."+zoneName) {
+		normalized := normalizeDNSName(zone.Name)
+		if _, ok := requiredZones[normalized]; !ok {
+			logger.Debug("skipping unrelated DNS zone", "zone", zone.Name)
+			continue
+		}
+		filtered = append(filtered, zone)
+		found[normalized] = struct{}{}
+	}
+
+	for _, zone := range missingZones(requiredZones, found) {
+		logger.Warn("required DNS zone not found in accessible Cloudflare zones; skipping", "zone", zone)
+	}
+
+	return orderZones(filtered)
+}
+
+func selectZoneForHostname(hostname string, state *hostnameZoneState, logger *slog.Logger) (string, bool) {
+	if len(state.explicitZones) > 1 {
+		zones := make([]string, 0, len(state.explicitZones))
+		for zone := range state.explicitZones {
+			zones = append(zones, zone)
+		}
+		sort.Strings(zones)
+		logger.Warn("conflicting DNS zone overrides for hostname; skipping hostname", "hostname", hostname, "zones", strings.Join(zones, ","))
+		return "", false
+	}
+
+	if len(state.explicitZones) == 1 {
+		for zone := range state.explicitZones {
 			return zone, true
 		}
 	}
-	return cloudflare.Zone{}, false
+
+	zone, err := autoZoneForHostname(hostname)
+	if err != nil {
+		logger.Warn("failed to derive DNS zone from hostname; skipping hostname", "hostname", hostname, "error", err)
+		return "", false
+	}
+
+	return zone, true
 }
 
-func filterHostnamesForZone(hostnames []string, zoneName string) []string {
-	items := []string{}
-	lowerZone := strings.ToLower(strings.TrimSuffix(zoneName, "."))
-	for _, hostname := range hostnames {
-		lower := strings.ToLower(strings.TrimSuffix(hostname, "."))
-		if lower == lowerZone || strings.HasSuffix(lower, "."+lowerZone) {
-			items = append(items, lower)
-		}
+func autoZoneForHostname(hostname string) (string, error) {
+	zone, err := publicsuffix.EffectiveTLDPlusOne(hostname)
+	if err != nil {
+		return "", err
 	}
-	return items
+	return normalizeDNSName(zone), nil
+}
+
+func missingZones(requiredZones map[string]struct{}, found map[string]struct{}) []string {
+	missing := make([]string, 0)
+	for zone := range requiredZones {
+		if _, ok := found[zone]; ok {
+			continue
+		}
+		missing = append(missing, zone)
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func normalizeDNSName(value string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
+}
+
+func hostnameMatchesZone(hostname string, zone string) bool {
+	return hostname == zone || strings.HasSuffix(hostname, "."+zone)
 }
 
 func dnsRecordEqual(record cloudflare.DNSRecord, desired cloudflare.DNSRecordInput) bool {
