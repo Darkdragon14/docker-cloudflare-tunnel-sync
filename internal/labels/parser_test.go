@@ -141,6 +141,68 @@ func TestParseContainersWithSuffixRoutes(t *testing.T) {
 	}
 }
 
+func TestParseContainersWithDNSZoneOverride(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "with-dns-zone",
+			Labels: map[string]string{
+				LabelEnable:  "true",
+				LabelHost:    "app.dev.example.com",
+				LabelService: "http://app:8080",
+				LabelDNSZone: "Dev.Example.Com.",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	if routes[0].DNSZoneOverride != "dev.example.com" {
+		t.Fatalf("expected dns zone override to be normalized, got %q", routes[0].DNSZoneOverride)
+	}
+}
+
+func TestParseContainersWithSuffixDNSZoneOverride(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "1",
+			Name: "suffix-dns-zone",
+			Labels: map[string]string{
+				LabelEnable:           "true",
+				LabelHost:             "app.example.com",
+				LabelService:          "http://app:8080",
+				LabelHost + ".api":    "api.dev.example.com",
+				LabelService + ".api": "http://api:8080",
+				LabelDNSZone + ".api": "dev.example.com",
+				LabelPath + ".api":    "/api",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d", len(routes))
+	}
+	if routes[0].DNSZoneOverride != "" {
+		t.Fatalf("expected base route to have no dns zone override, got %q", routes[0].DNSZoneOverride)
+	}
+	if routes[1].DNSZoneOverride != "dev.example.com" {
+		t.Fatalf("expected suffix route dns zone override, got %q", routes[1].DNSZoneOverride)
+	}
+}
+
 func TestParseContainersMissingSuffixService(t *testing.T) {
 	parser := NewParser()
 

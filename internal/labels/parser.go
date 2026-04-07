@@ -14,6 +14,7 @@ const (
 	LabelPrefix            = "cloudflare.tunnel."
 	LabelEnable            = LabelPrefix + "enable"
 	LabelHost              = LabelPrefix + "hostname"
+	LabelDNSZone           = LabelPrefix + "dns.zone"
 	LabelPath              = LabelPrefix + "path"
 	LabelService           = LabelPrefix + "service"
 	LabelOriginServerName  = LabelPrefix + "origin.server-name"
@@ -83,11 +84,17 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 			continue
 		}
 
+		dnsZone, err := parseDNSZoneLabel(container.Name, container.Labels, LabelDNSZone)
+		if err != nil {
+			errors = append(errors, err)
+		}
+
 		key := model.RouteKey{Hostname: hostname, Path: path}
 		source := model.SourceRef{ContainerID: container.ID, ContainerName: container.Name}
 		if err := appendRouteSpec(&desired, desiredKeys, model.RouteSpec{
 			Key:              key,
 			Service:          service,
+			DNSZoneOverride:  dnsZone,
 			OriginServerName: originServerName,
 			NoTLSVerify:      originNoTLSVerify,
 			Source:           source,
@@ -147,10 +154,17 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 				continue
 			}
 
+			dnsZoneKey := LabelDNSZone + "." + suffix
+			dnsZone, err := parseDNSZoneLabel(container.Name, container.Labels, dnsZoneKey)
+			if err != nil {
+				errors = append(errors, err)
+			}
+
 			key := model.RouteKey{Hostname: hostname, Path: path}
 			if err := appendRouteSpec(&desired, desiredKeys, model.RouteSpec{
 				Key:              key,
 				Service:          service,
+				DNSZoneOverride:  dnsZone,
 				OriginServerName: originServerName,
 				NoTLSVerify:      originNoTLSVerify,
 				Source:           source,
@@ -217,6 +231,20 @@ func parseOriginLabels(containerName string, labels map[string]string, serverNam
 	}
 
 	return originServerName, originNoTLSVerify, nil
+}
+
+func parseDNSZoneLabel(containerName string, labels map[string]string, zoneLabel string) (string, error) {
+	zoneValue, hasZone := labels[zoneLabel]
+	if !hasZone {
+		return "", nil
+	}
+
+	trimmed := strings.TrimSpace(zoneValue)
+	if trimmed == "" {
+		return "", fmt.Errorf("container %s: %s cannot be empty", containerName, zoneLabel)
+	}
+
+	return strings.ToLower(strings.TrimSuffix(trimmed, ".")), nil
 }
 
 // ParseAccessContainers returns desired Access apps and any validation errors.

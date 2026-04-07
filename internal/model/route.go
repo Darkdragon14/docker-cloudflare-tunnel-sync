@@ -25,6 +25,7 @@ type SourceRef struct {
 type RouteSpec struct {
 	Key              RouteKey
 	Service          string
+	DNSZoneOverride  string
 	OriginServerName *string
 	NoTLSVerify      *bool
 	Source           SourceRef
