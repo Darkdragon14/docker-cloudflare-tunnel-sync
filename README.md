@@ -104,6 +104,36 @@ docker run --rm \
 
 > ⚠️ The Docker socket is mounted read-only for safety.
 
+Docker secrets are also supported for the sensitive Cloudflare values. The controller checks `/run/secrets/<VARIABLE>` before falling back to the matching environment variable.
+
+Example with Docker Compose:
+
+```yaml
+services:
+  docker-cloudflare-tunnel-sync:
+    image: ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
+    secrets:
+      - CF_API_TOKEN
+      - CF_ACCOUNT_ID
+      - CF_TUNNEL_ID
+    environment:
+      SYNC_MANAGED_TUNNEL: "true"
+      SYNC_MANAGED_ACCESS: "true"
+      SYNC_MANAGED_DNS: "true"
+      SYNC_DELETE_DNS: "true"
+      SYNC_POLL_INTERVAL: 30s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+secrets:
+  CF_API_TOKEN:
+    file: ./secrets/cf_api_token
+  CF_ACCOUNT_ID:
+    file: ./secrets/cf_account_id
+  CF_TUNNEL_ID:
+    file: ./secrets/cf_tunnel_id
+```
+
 ---
 
 ### 3. Label your containers
@@ -146,6 +176,18 @@ Start the container — it is automatically exposed.
 | `SYNC_DELETE_DNS` | no | `false` | Delete managed DNS records in zones selected from current labels plus any zones listed in `SYNC_DNS_ZONES`. This does not perform a full account-wide cleanup. |
 | `SYNC_MANAGED_BY` | no | `docker-cf-tunnel-sync` | Override the managed-by tag/comment value (used for Access tags and DNS comments). |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
+
+For `CF_API_TOKEN`, `CF_ACCOUNT_ID`, and `CF_TUNNEL_ID`, required means the value must be provided either as an environment variable or as a Docker secret.
+
+### Docker secrets
+
+The following sensitive values can be provided either as environment variables or Docker secrets mounted at `/run/secrets/<VARIABLE>`. Docker secrets take precedence when present and non-empty.
+
+| Secret | Required | Description |
+| --- | --- | --- |
+| `CF_API_TOKEN` | yes | Cloudflare API token. |
+| `CF_ACCOUNT_ID` | yes | Cloudflare account identifier. |
+| `CF_TUNNEL_ID` | yes | Cloudflare Tunnel identifier. |
 
 ---
 
@@ -270,6 +312,10 @@ Planned improvements:
 PRs and issues are welcome.
 
 If you plan major changes, please open a discussion first.
+
+## 🤝 Contributors
+
+- [Warren Noronha (@wnoronha)](https://github.com/wnoronha) - Docker secrets support.
 
 ---
 
