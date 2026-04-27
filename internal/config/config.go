@@ -3,13 +3,16 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"log/slog"
 )
 
-// Config captures all runtime configuration derived from environment variables.
+var dockerSecretsDir = "/run/secrets"
+
+// Config captures all runtime configuration derived from environment variables and Docker secrets.
 type Config struct {
 	Docker     DockerConfig
 	Cloudflare CloudflareConfig
@@ -41,7 +44,7 @@ type ControllerConfig struct {
 	DeleteDNS    bool
 }
 
-// Load parses configuration from environment variables.
+// Load parses configuration from environment variables and Docker secrets.
 func Load() (Config, error) {
 	pollInterval := getEnvDefault("SYNC_POLL_INTERVAL", "30s")
 	parsedInterval, err := time.ParseDuration(pollInterval)
@@ -82,15 +85,15 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	apiToken, err := requiredEnv("CF_API_TOKEN")
+	apiToken, err := requiredSecretOrEnv("CF_API_TOKEN")
 	if err != nil {
 		return Config{}, err
 	}
-	accountID, err := requiredEnv("CF_ACCOUNT_ID")
+	accountID, err := requiredSecretOrEnv("CF_ACCOUNT_ID")
 	if err != nil {
 		return Config{}, err
 	}
-	tunnelID, err := requiredEnv("CF_TUNNEL_ID")
+	tunnelID, err := requiredSecretOrEnv("CF_TUNNEL_ID")
 	if err != nil {
 		return Config{}, err
 	}
@@ -121,12 +124,34 @@ func Load() (Config, error) {
 	}, nil
 }
 
-func requiredEnv(key string) (string, error) {
+func requiredSecretOrEnv(key string) (string, error) {
+	if value, ok, err := dockerSecret(key); err != nil {
+		return "", err
+	} else if ok {
+		return value, nil
+	}
+
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
-		return "", fmt.Errorf("missing required %s", key)
+		return "", fmt.Errorf("missing required %s (set %s or /run/secrets/%s)", key, key, key)
 	}
 	return value, nil
+}
+
+func dockerSecret(key string) (string, bool, error) {
+	content, err := os.ReadFile(filepath.Join(dockerSecretsDir, key))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("read Docker secret %s: %w", key, err)
+	}
+
+	value := strings.TrimSpace(string(content))
+	if value == "" {
+		return "", false, nil
+	}
+	return value, true, nil
 }
 
 func getEnvDefault(key, fallback string) string {
