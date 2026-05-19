@@ -5,8 +5,6 @@ order: 4
 toc: true
 ---
 
-# DNS Synchronization
-
 Docker Cloudflare Tunnel Sync can optionally manage Cloudflare DNS records for hostnames declared by Docker labels.
 
 DNS synchronization is disabled by default. Enable it with `SYNC_MANAGED_DNS=true`.
