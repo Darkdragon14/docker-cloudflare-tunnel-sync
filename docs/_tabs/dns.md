@@ -1,9 +1,8 @@
 ---
-layout: page
 title: DNS Synchronization
-permalink: /dns/
 icon: fas fa-globe
 order: 4
+toc: true
 ---
 
 # DNS Synchronization
