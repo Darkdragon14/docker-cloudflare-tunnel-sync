@@ -1,0 +1,106 @@
+# The Site Configuration
+
+theme: jekyll-theme-chirpy
+
+lang: en
+timezone: Europe/Paris
+
+title: Docker Cloudflare Tunnel Sync
+tagline: Traefik-like labels for Cloudflare Tunnel
+description: >-
+  Expose Docker services through Cloudflare Tunnel using Docker labels,
+  with optional DNS and Cloudflare Access synchronization.
+
+url: "https://darkdragon14.github.io"
+baseurl: "/docker-cloudflare-tunnel-sync"
+
+github:
+  username: darkdragon14
+
+social:
+  name: Docker Cloudflare Tunnel Sync
+  links:
+    - https://github.com/darkdragon14/docker-cloudflare-tunnel-sync
+
+theme_mode:
+cdn:
+avatar:
+social_preview_image:
+toc: true
+
+comments:
+  provider:
+
+assets:
+  self_host:
+    enabled:
+    env:
+
+pwa:
+  enabled: true
+  cache:
+    enabled: true
+    deny_paths:
+
+kramdown:
+  footnote_backlink: "&#8617;&#xfe0e;"
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    css_class: highlight
+    span:
+      line_numbers: false
+    block:
+      line_numbers: true
+      start_line: 1
+
+collections:
+  tabs:
+    output: true
+    sort_by: order
+
+defaults:
+  - scope:
+      path: ""
+      type: posts
+    values:
+      layout: post
+      comments: false
+      toc: true
+      permalink: /posts/:title/
+  - scope:
+      path: ""
+      type: tabs
+    values:
+      layout: page
+      permalink: /:title/
+      toc: true
+
+sass:
+  style: compressed
+
+compress_html:
+  clippings: all
+  comments: all
+  endings: all
+  profile: false
+  blanklines: false
+  ignore:
+    envs: [development]
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md
+  - vendor
+  - .bundle
+  - .jekyll-cache
+  - _site
+
+jekyll-archives:
+  enabled: [categories, tags]
+  layouts:
+    category: category
+    tag: tag
+  permalinks:
+    tag: /tags/:name/
+    category: /categories/:name/
