@@ -5,8 +5,6 @@ order: 8
 toc: true
 ---
 
-# Migration to v1.0
-
 Docker Cloudflare Tunnel Sync is being prepared for a stable v1.0 release.
 
 The goal is to keep the existing behavior understandable while making the documentation, labels, and safety model clearer.
