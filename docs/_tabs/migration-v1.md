@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Migration to v1.0
-permalink: /migration-v1/
 icon: fas fa-route
 order: 8
+toc: true
 ---
 
 # Migration to v1.0
