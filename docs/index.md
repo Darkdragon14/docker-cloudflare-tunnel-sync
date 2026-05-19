@@ -77,7 +77,7 @@ When managed tunnel synchronization is enabled, routes that are no longer declar
 - [Labels Reference]({{ '/labels/' | relative_url }}): base route labels, multiple routes, DNS labels, Access labels, and origin settings.
 - [DNS Synchronization]({{ '/dns/' | relative_url }}): managed DNS records, zone selection, delegated zones, and cleanup scope.
 - [Cloudflare Access]({{ '/access/' | relative_url }}): Access applications, policies, tags, references, and limitations.
-- [Safety Model]({{ '/safety/' | relative_url }}): dedicated tunnel recommendation, cleanup behavior, Docker socket risk, and dry-run usage.
+- [Safety Model]({{ '/safety/' | relative_url }}): dedicated tunnel recommendation, cleanup behavior, and dry-run usage.
 - [Examples]({{ '/examples/' | relative_url }}): common Compose examples for self-hosted services.
 - [Migration to v1.0]({{ '/migration-v1/' | relative_url }}): stable label format, recommended setup, and migration notes.
 
