@@ -5,8 +5,6 @@ order: 2
 toc: true
 ---
 
-# Configuration
-
 Docker Cloudflare Tunnel Sync is configured with environment variables or Docker secrets for sensitive Cloudflare values.
 
 ## Environment variables
