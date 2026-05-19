@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Installation
-permalink: /installation/
 icon: fas fa-download
 order: 1
+toc: true
 ---
 
 # Installation
