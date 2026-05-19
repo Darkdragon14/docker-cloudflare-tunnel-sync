@@ -5,8 +5,6 @@ order: 3
 toc: true
 ---
 
-# Labels Reference
-
 Docker Cloudflare Tunnel Sync only manages containers that explicitly opt in with Docker labels.
 
 A container is ignored unless this label is present:
