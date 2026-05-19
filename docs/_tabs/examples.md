@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Examples
-permalink: /examples/
 icon: fas fa-code
 order: 7
+toc: true
 ---
 
 # Examples
