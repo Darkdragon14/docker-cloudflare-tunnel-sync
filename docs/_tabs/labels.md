@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Labels Reference
-permalink: /labels/
 icon: fas fa-tags
 order: 3
+toc: true
 ---
 
 # Labels Reference
