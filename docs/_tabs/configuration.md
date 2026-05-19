@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Configuration
-permalink: /configuration/
 icon: fas fa-sliders
 order: 2
+toc: true
 ---
 
 # Configuration
