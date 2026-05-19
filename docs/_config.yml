@@ -24,8 +24,8 @@ social:
 
 theme_mode:
 cdn:
-avatar:
-social_preview_image:
+avatar: /assets/img/logo.svg
+social_preview_image: /assets/img/logo.svg
 toc: true
 
 comments:
