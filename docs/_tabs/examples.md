@@ -5,8 +5,6 @@ order: 7
 toc: true
 ---
 
-# Examples
-
 This page contains common Docker Compose examples for Docker Cloudflare Tunnel Sync.
 
 ## Basic HTTP service
