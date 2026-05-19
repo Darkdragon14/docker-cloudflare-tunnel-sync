@@ -5,10 +5,6 @@ order: 1
 toc: true
 ---
 
-# Installation
-
-This guide explains how to deploy Docker Cloudflare Tunnel Sync and connect it to a dedicated Cloudflare Tunnel.
-
 ## Prerequisites
 
 You need:
