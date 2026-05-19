@@ -5,8 +5,6 @@ order: 6
 toc: true
 ---
 
-# Safety Model
-
 Docker Cloudflare Tunnel Sync is designed to be explicit and predictable.
 
 It does not manage every Docker container automatically. A service must opt in with labels before it is considered by the controller.
