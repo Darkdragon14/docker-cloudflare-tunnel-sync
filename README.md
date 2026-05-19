@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="Docker Cloudflare Tunnel Sync logo" width="180">
+</p>
+
 # docker-cloudflare-tunnel-sync
 
 [![Release](https://img.shields.io/github/v/release/Darkdragon14/docker-cloudflare-tunnel-sync?sort=semver)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/releases/latest) [![Tests](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/tests.yml) [![Container](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/ghcr.yml/badge.svg?branch=main)](https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync/actions/workflows/ghcr.yml)
