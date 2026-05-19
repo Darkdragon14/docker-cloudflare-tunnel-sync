@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Safety Model
-permalink: /safety/
 icon: fas fa-triangle-exclamation
 order: 6
+toc: true
 ---
 
 # Safety Model
