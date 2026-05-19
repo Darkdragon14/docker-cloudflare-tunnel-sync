@@ -9,7 +9,7 @@ title: Docker Cloudflare Tunnel Sync
 tagline: Traefik-like labels for Cloudflare Tunnel
 description: >-
   Expose Docker services through Cloudflare Tunnel using Docker labels,
-  with optional DNS and Cloudflare Access synchronization.
+  with optional DNS and Cloudflare Access sync.
 
 url: "https://darkdragon14.github.io"
 baseurl: "/docker-cloudflare-tunnel-sync"
