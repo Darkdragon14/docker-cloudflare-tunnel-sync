@@ -1,9 +1,8 @@
 ---
-layout: page
 title: Cloudflare Access
-permalink: /access/
 icon: fas fa-shield-halved
 order: 5
+toc: true
 ---
 
 # Cloudflare Access
