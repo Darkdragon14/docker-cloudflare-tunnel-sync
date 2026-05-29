@@ -9,21 +9,9 @@
 
     const desktop = window.matchMedia('(min-width: 1200px)').matches;
     const tocSelector = desktop ? '#toc' : '#toc-popup-content';
-    const toc = document.querySelector(tocSelector);
 
-    if (!toc) {
+    if (!document.querySelector(tocSelector)) {
       return;
-    }
-
-    if (desktop && !tocWrapper.querySelector('.vv-toc-repo-badges')) {
-      toc.insertAdjacentHTML('beforebegin', `
-        <div class="vv-toc-repo-badges">
-          <a class="vv-repo-badges" href="https://github.com/Darkdragon14/docker-cloudflare-tunnel-sync" target="_blank" rel="noopener noreferrer" aria-label="Docker Cloudflare Tunnel Sync GitHub stars and latest release">
-            <img class="vv-repo-badges__light" src="https://shieldcn.dev/group/github/stars/Darkdragon14/docker-cloudflare-tunnel-sync+github/release/Darkdragon14/docker-cloudflare-tunnel-sync.svg?size=sm&variant=principal" alt="Docker Cloudflare Tunnel Sync GitHub stars and latest release" height="20">
-            <img class="vv-repo-badges__dark" src="https://shieldcn.dev/group/github/stars/Darkdragon14/docker-cloudflare-tunnel-sync+github/release/Darkdragon14/docker-cloudflare-tunnel-sync.svg?size=sm&variant=secondary" alt="Docker Cloudflare Tunnel Sync GitHub stars and latest release" height="20">
-          </a>
-        </div>
-      `);
     }
 
     window.tocbot.init({
