@@ -90,23 +90,26 @@ Pull the image:
 docker pull ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
 ```
 
-Run with Docker:
+Start with a safer first run using dry-run mode:
 
 ```bash
 docker run --rm \
   -e CF_API_TOKEN=your-token \
   -e CF_ACCOUNT_ID=your-account-id \
   -e CF_TUNNEL_ID=your-tunnel-id \
+  -e SYNC_DRY_RUN=true \
   -e SYNC_MANAGED_TUNNEL=true \
-  -e SYNC_MANAGED_ACCESS=true \
-  -e SYNC_MANAGED_DNS=true \
-  -e SYNC_DELETE_DNS=true \
+  -e SYNC_MANAGED_ACCESS=false \
+  -e SYNC_MANAGED_DNS=false \
+  -e SYNC_DELETE_DNS=false \
   -e SYNC_POLL_INTERVAL=30s \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
 ```
 
 > ⚠️ The Docker socket is mounted read-only for safety.
+
+Once the dry-run output looks correct, disable `SYNC_DRY_RUN` and enable DNS or Access synchronization only if needed.
 
 Docker secrets are also supported for the sensitive Cloudflare values. The controller checks `/run/secrets/<VARIABLE>` before falling back to the matching environment variable.
 
@@ -121,10 +124,11 @@ services:
       - CF_ACCOUNT_ID
       - CF_TUNNEL_ID
     environment:
+      SYNC_DRY_RUN: "true"
       SYNC_MANAGED_TUNNEL: "true"
-      SYNC_MANAGED_ACCESS: "true"
-      SYNC_MANAGED_DNS: "true"
-      SYNC_DELETE_DNS: "true"
+      SYNC_MANAGED_ACCESS: "false"
+      SYNC_MANAGED_DNS: "false"
+      SYNC_DELETE_DNS: "false"
       SYNC_POLL_INTERVAL: 30s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -154,7 +158,26 @@ services:
       cloudflare.tunnel.service: http://app:80
 ```
 
-Start the container — it is automatically exposed.
+Start the container — it is automatically exposed once managed synchronization is enabled.
+
+---
+
+## 📚 Documentation
+
+The full documentation is available on GitHub Pages:
+
+https://darkdragon14.github.io/docker-cloudflare-tunnel-sync/
+
+Main sections:
+
+- Installation
+- Configuration
+- Labels reference
+- DNS synchronization
+- Cloudflare Access
+- Safety model
+- Examples
+- Migration to v1.0
 
 ---
 
@@ -236,14 +259,14 @@ Example:
 ```bash
 -e SYNC_MANAGED_DNS=true \
 -e SYNC_DELETE_DNS=true \
--e SYNC_DNS_ZONES=darkdragon.fr,cf.darkdragon.fr
+-e SYNC_DNS_ZONES=example.com,dev.example.com
 ```
 
 `cloudflare.tunnel.dns.zone` selects the Cloudflare zone for a specific hostname. `SYNC_DNS_ZONES` is different: it only keeps whole zones in the cleanup scan set when deleting orphaned DNS records.
 
 ### Access labels
 
-Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails, IPs, and tags. If only `policy.N.id` or `policy.N.name` is provided, the policy is referenced without updates. If `cloudflare.access.app.domain` is omitted, the controller uses `cloudflare.tunnel.hostname`. When `cloudflare.access.app.tags` is set, the controller ensures those tags exist (creating them if needed) and manages app tags to match that list (plus the managed-by tag when `SYNC_MANAGED_ACCESS=true`); if omitted, existing tags are preserved.
+Access applications are only managed when `cloudflare.access.enable=true`. Policy indices (`policy.1`, `policy.2`, etc.) define evaluation order. Comma-separated lists are accepted for emails, IPs, and tags. If only `policy.N.id` or `policy.N.name` is provided, the policy is referenced without updates. If `cloudflare.access.app.domain` is omitted, the controller uses `cloudflare.tunnel.hostname`. When `cloudflare.access.app.tags` is set, the controller ensures those tags exist and manages app tags to match that list; if omitted, existing tags are preserved.
 
 | Label | Required | Example | Description |
 | --- | --- | --- | --- |
@@ -259,7 +282,6 @@ Access applications are only managed when `cloudflare.access.enable=true`. Polic
 | `cloudflare.access.policy.1.id` | no | `policy-uuid` | Optional existing policy ID. If set without other policy fields, the policy is referenced only and not updated (same behavior for name-only references). |
 
 When no app or policy ID is provided, the controller matches existing resources by name (and domain for apps); if multiple matches exist, reconciliation is skipped with a warning. Name-only policy references must match an existing policy. If a policy ID is provided but not found in account-level policies, the controller will still attach the ID (useful for app-scoped policies).
-
 
 ---
 
@@ -302,12 +324,20 @@ Useful for:
 
 ---
 
-## 🗺️ Roadmap
+## 📌 Project status
+
+Docker Cloudflare Tunnel Sync is stable and follows semantic versioning.
+
+The v1.x series keeps the current label format stable. Breaking label or configuration changes will be reserved for a future major version.
+
+---
+
+## 🗺️ Future improvements
 
 Planned improvements:
 
-- [ ] Label validation
-- [ ] Web UI (optional)
+- [ ] More label diagnostics and validation messages
+- [ ] Optional Web UI
 
 ---
 
