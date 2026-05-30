@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" alt="docker-cloudflare-tunnel-sync logo" width="260">
+  <img src="docs/assets/logo.png" alt="docker-cloudflare-tunnel-sync logo" width="260">
 </p>
 
 # docker-cloudflare-tunnel-sync
