@@ -45,6 +45,7 @@ docker run --rm \
   -e CF_API_TOKEN=your-token \
   -e CF_ACCOUNT_ID=your-account-id \
   -e CF_TUNNEL_ID=your-tunnel-id \
+  -e SYNC_DRY_RUN=true \
   -e SYNC_MANAGED_TUNNEL=true \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   ghcr.io/darkdragon14/docker-cloudflare-tunnel-sync
@@ -62,7 +63,7 @@ services:
       cloudflare.tunnel.service: http://whoami:80
 ```
 
-The controller reconciles the Cloudflare Tunnel configuration from the labels.
+The controller reconciles the Cloudflare Tunnel configuration from the labels. Start with dry-run mode, then disable it when the planned changes look correct.
 
 ## Safety Warning
 
@@ -106,9 +107,9 @@ Docker Cloudflare Tunnel Sync does not replace Traefik, Caddy, Nginx, or Cloudfl
 
 ## Project Status
 
-Docker Cloudflare Tunnel Sync is being prepared for a stable v1.0 release.
+Docker Cloudflare Tunnel Sync is stable and follows semantic versioning.
 
-The goal of v1.0 is to provide a stable label format, clearer documentation, safer defaults, better migration guidance, and a cleaner onboarding experience.
+The v1.x series keeps the current label format stable. Breaking label or configuration changes will be reserved for a future major version.
 
 ## License
 
