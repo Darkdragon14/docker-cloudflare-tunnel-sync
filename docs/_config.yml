@@ -11,8 +11,8 @@ description: >-
   Expose Docker services through Cloudflare Tunnel using Docker labels,
   with optional DNS and Access sync.
 
-url: "https://darkdragon14.github.io"
-baseurl: "/docker-cloudflare-tunnel-sync"
+url: "https://docker-cloudflare-tunnel-sync.darkdragon14.dev"
+baseurl: ""
 
 github:
   username: darkdragon14
@@ -43,7 +43,7 @@ pwa:
     deny_paths:
 
 kramdown:
-  footnote_backlink: "&#8617;&#xfe0e;"
+  footnote_backlink: "back"
   syntax_highlighter: rouge
   syntax_highlighter_opts:
     css_class: highlight
