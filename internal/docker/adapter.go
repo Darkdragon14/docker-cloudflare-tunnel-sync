@@ -4,7 +4,10 @@ import (
 	"context"
 	"strings"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/config"
@@ -46,12 +49,70 @@ func (adapter *Adapter) ListRunningContainers(ctx context.Context) ([]ContainerI
 		if len(item.Names) > 0 {
 			name = strings.TrimPrefix(item.Names[0], "/")
 		}
+		ports := make([]PortInfo, 0, len(item.Ports))
+		for _, port := range item.Ports {
+			ports = append(ports, PortInfo{
+				PrivatePort: port.PrivatePort,
+				PublicPort:  port.PublicPort,
+				Type:        port.Type,
+			})
+		}
+		networks := map[string]string{}
+		if item.NetworkSettings != nil {
+			for networkName, endpoint := range item.NetworkSettings.Networks {
+				if endpoint == nil {
+					continue
+				}
+				networks[networkName] = endpoint.IPAddress
+			}
+		}
 		results = append(results, ContainerInfo{
-			ID:     item.ID,
-			Name:   name,
-			Labels: item.Labels,
+			ID:       item.ID,
+			Name:     name,
+			Labels:   item.Labels,
+			Ports:    ports,
+			Networks: networks,
 		})
 	}
 
 	return results, nil
+}
+
+// WatchContainerEvents streams container lifecycle events that can change the set of running
+// containers (start, die, destroy). The events channel is closed when the stream ends; the
+// error channel receives the reason (including context cancellation).
+func (adapter *Adapter) WatchContainerEvents(ctx context.Context) (<-chan ContainerEvent, <-chan error) {
+	filter := filters.NewArgs(
+		filters.Arg("type", string(events.ContainerEventType)),
+		filters.Arg("event", string(events.ActionStart)),
+		filters.Arg("event", string(events.ActionDie)),
+		filters.Arg("event", string(events.ActionDestroy)),
+	)
+	messages, errs := adapter.client.Events(ctx, types.EventsOptions{Filters: filter})
+
+	out := make(chan ContainerEvent)
+	outErrs := make(chan error, 1)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case err := <-errs:
+				outErrs <- err
+				return
+			case message := <-messages:
+				event := ContainerEvent{
+					ID:     message.Actor.ID,
+					Name:   message.Actor.Attributes["name"],
+					Action: string(message.Action),
+				}
+				select {
+				case out <- event:
+				case <-ctx.Done():
+					outErrs <- ctx.Err()
+					return
+				}
+			}
+		}
+	}()
+	return out, outErrs
 }

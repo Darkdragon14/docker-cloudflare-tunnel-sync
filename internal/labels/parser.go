@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/docker"
 	"github.com/darkdragon/docker-cloudflare-tunnel-sync/internal/model"
@@ -30,10 +31,33 @@ const (
 )
 
 // Parser converts Docker labels into desired Cloudflare ingress rules.
-type Parser struct{}
+type Parser struct {
+	defaults         Defaults
+	hostnameTemplate *template.Template
+	serviceTemplate  *template.Template
+}
 
+// NewParser returns a parser that requires explicit hostname and service labels.
 func NewParser() *Parser {
 	return &Parser{}
+}
+
+// NewParserWithDefaults returns a parser that falls back to the given templates when
+// hostname or service labels are missing.
+func NewParserWithDefaults(defaults Defaults) (*Parser, error) {
+	hostnameTemplate, err := compileTemplate("default hostname", defaults.HostnameTemplate)
+	if err != nil {
+		return nil, err
+	}
+	serviceTemplate, err := compileTemplate("default service", defaults.ServiceTemplate)
+	if err != nil {
+		return nil, err
+	}
+	return &Parser{
+		defaults:         defaults,
+		hostnameTemplate: hostnameTemplate,
+		serviceTemplate:  serviceTemplate,
+	}, nil
 }
 
 // ParseContainers returns desired tunnel ingress rules and any validation errors.
@@ -61,16 +85,16 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 			continue
 		}
 
-		hostname := strings.TrimSpace(container.Labels[LabelHost])
-		service := strings.TrimSpace(container.Labels[LabelService])
 		path := strings.TrimSpace(container.Labels[LabelPath])
 
-		if hostname == "" {
-			errors = append(errors, fmt.Errorf("container %s: missing required %s label", container.Name, LabelHost))
+		hostnames, err := parser.resolveHostnames(container)
+		if err != nil {
+			errors = append(errors, err)
 			continue
 		}
-		if service == "" {
-			errors = append(errors, fmt.Errorf("container %s: missing required %s label", container.Name, LabelService))
+		service, err := parser.resolveService(container)
+		if err != nil {
+			errors = append(errors, err)
 			continue
 		}
 		if path != "" && !strings.HasPrefix(path, "/") {
@@ -89,17 +113,18 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 			errors = append(errors, err)
 		}
 
-		key := model.RouteKey{Hostname: hostname, Path: path}
 		source := model.SourceRef{ContainerID: container.ID, ContainerName: container.Name}
-		if err := appendRouteSpec(&desired, desiredKeys, model.RouteSpec{
-			Key:              key,
-			Service:          service,
-			DNSZoneOverride:  dnsZone,
-			OriginServerName: originServerName,
-			NoTLSVerify:      originNoTLSVerify,
-			Source:           source,
-		}); err != nil {
-			errors = append(errors, err)
+		for _, hostname := range hostnames {
+			if err := appendRouteSpec(&desired, desiredKeys, model.RouteSpec{
+				Key:              model.RouteKey{Hostname: hostname, Path: path},
+				Service:          service,
+				DNSZoneOverride:  dnsZone,
+				OriginServerName: originServerName,
+				NoTLSVerify:      originNoTLSVerify,
+				Source:           source,
+			}); err != nil {
+				errors = append(errors, err)
+			}
 		}
 
 		hostSuffixes := collectSuffixes(container.Labels, LabelHost)
@@ -132,11 +157,16 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 			originServerNameKey := LabelOriginServerName + "." + suffix
 			originNoTLSVerifyKey := LabelOriginNoTLSVerify + "." + suffix
 
-			hostname := strings.TrimSpace(container.Labels[hostnameKey])
+			hostnameValue := strings.TrimSpace(container.Labels[hostnameKey])
 			service := strings.TrimSpace(container.Labels[serviceKey])
 			path := strings.TrimSpace(container.Labels[pathKey])
-			if hostname == "" {
+			if hostnameValue == "" {
 				errors = append(errors, fmt.Errorf("container %s: %s cannot be empty; skipping", container.Name, hostnameKey))
+				continue
+			}
+			suffixHostnames, err := splitHostnames(hostnameValue)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("container %s: %s %q: %w; skipping", container.Name, hostnameKey, hostnameValue, err))
 				continue
 			}
 			if service == "" {
@@ -160,16 +190,17 @@ func (parser *Parser) ParseContainers(containers []docker.ContainerInfo) ([]mode
 				errors = append(errors, err)
 			}
 
-			key := model.RouteKey{Hostname: hostname, Path: path}
-			if err := appendRouteSpec(&desired, desiredKeys, model.RouteSpec{
-				Key:              key,
-				Service:          service,
-				DNSZoneOverride:  dnsZone,
-				OriginServerName: originServerName,
-				NoTLSVerify:      originNoTLSVerify,
-				Source:           source,
-			}); err != nil {
-				errors = append(errors, err)
+			for _, hostname := range suffixHostnames {
+				if err := appendRouteSpec(&desired, desiredKeys, model.RouteSpec{
+					Key:              model.RouteKey{Hostname: hostname, Path: path},
+					Service:          service,
+					DNSZoneOverride:  dnsZone,
+					OriginServerName: originServerName,
+					NoTLSVerify:      originNoTLSVerify,
+					Source:           source,
+				}); err != nil {
+					errors = append(errors, err)
+				}
 			}
 		}
 	}
@@ -285,12 +316,12 @@ func (parser *Parser) ParseAccessContainers(containers []docker.ContainerInfo) (
 			continue
 		}
 		if appDomain == "" {
-			tunnelDomain := strings.TrimSpace(container.Labels[LabelHost])
-			if tunnelDomain == "" {
+			tunnelDomains, err := parser.resolveHostnames(container)
+			if err != nil {
 				errors = append(errors, fmt.Errorf("container %s: missing %s; set %s or %s", container.Name, AccessLabelAppDomain, AccessLabelAppDomain, LabelHost))
 				continue
 			}
-			appDomain = tunnelDomain
+			appDomain = tunnelDomains[0]
 		}
 
 		policies, policyErrors := parseAccessPolicies(container)

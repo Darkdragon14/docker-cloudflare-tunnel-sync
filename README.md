@@ -194,6 +194,8 @@ Main sections:
 | `DOCKER_HOST` | no | - | Docker daemon host (standard Docker env var). |
 | `DOCKER_API_VERSION` | no | - | Docker API version override. |
 | `SYNC_POLL_INTERVAL` | no | `30s` | Controller poll interval. |
+| `SYNC_WATCH_EVENTS` | no | `true` | Also sync immediately when Docker reports container `start`/`die`/`destroy` events (works with a read-only socket). Polling keeps running as a fallback. |
+| `SYNC_EVENT_DEBOUNCE` | no | `2s` | Wait this long after the last Docker event before syncing, so a `docker compose up` burst triggers one sync. |
 | `SYNC_RUN_ONCE` | no | `false` | Run a single reconciliation and exit. |
 | `SYNC_DRY_RUN` | no | `false` | Log changes without applying them. |
 | `SYNC_MANAGED_TUNNEL` | no | `false` | Allow this tool to overwrite the tunnel ingress configuration. |
@@ -201,6 +203,10 @@ Main sections:
 | `SYNC_MANAGED_DNS` | no | `false` | Allow this tool to create/update DNS CNAME records for tunnel hostnames. |
 | `SYNC_DNS_ZONES` | no | - | Comma-separated DNS zones to keep scanning for orphan cleanup when `SYNC_DELETE_DNS=true`, even if no current labels resolve to those zones. |
 | `SYNC_DELETE_DNS` | no | `false` | Delete managed DNS records in zones selected from current labels plus any zones listed in `SYNC_DNS_ZONES`. This does not perform a full account-wide cleanup. |
+| `SYNC_DEFAULT_HOSTNAME` | no | - | Go template used as the base hostname when `cloudflare.tunnel.hostname` is missing (like Traefik `defaultRule`). See [Default rules](#default-rules). |
+| `SYNC_AUTO_SERVICE` | no | `false` | Derive the base service from the exposed container port when `cloudflare.tunnel.service` is missing. |
+| `SYNC_DEFAULT_SERVICE` | no | `http://{{ .Name }}:{{ .Port }}` | Go template used for the base service when `SYNC_AUTO_SERVICE=true`. |
+| `SYNC_DOCKER_NETWORK` | no | - | Docker network whose container IP is exposed to templates as `{{ .IP }}`. |
 | `SYNC_MANAGED_BY` | no | `docker-cf-tunnel-sync` | Override the managed-by tag/comment value (used for Access tags and DNS comments). |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 
@@ -225,16 +231,18 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 | Label | Required | Example | Description |
 | --- | --- | --- | --- |
 | `cloudflare.tunnel.enable` | yes | `true` | Opt-in flag for route creation. |
-| `cloudflare.tunnel.hostname` | yes | `app.example.com` | Base route hostname (required). |
-| `cloudflare.tunnel.service` | yes | `http://api:8080` | Base route service/origin URL (required). |
+| `cloudflare.tunnel.hostname` | yes* | `app.example.com,app.example.org` | Base route hostname, or a comma-separated list of hostnames that share the base service. *Optional when `SYNC_DEFAULT_HOSTNAME` is set. |
+| `cloudflare.tunnel.service` | yes* | `http://api:8080` | Base route service/origin URL. *Optional when `SYNC_AUTO_SERVICE=true` (derived from the exposed port). |
 | `cloudflare.tunnel.dns.zone` | no | `dev.example.com` | Override automatic DNS zone selection for this route hostname. Useful when Cloudflare manages a delegated sub-zone. |
 | `cloudflare.tunnel.path` | no | `/api` | Optional base route path prefix (must start with `/`). |
 | `cloudflare.tunnel.origin.server-name` | no | `app.internal` | Optional base route `originRequest.originServerName` (TLS SNI override). |
 | `cloudflare.tunnel.origin.no-tls-verify` | no | `true` | Optional base route `originRequest.noTLSVerify` (`true`/`false`). |
+| `cloudflare.tunnel.port` | no | `8080` | Port used by the default service template (overrides auto-detected exposed port). |
+| `cloudflare.tunnel.network` | no | `proxy` | Network used for `{{ .IP }}` in the default service template. |
 
 > **Note - Additional routes by suffix**
 >
-> The base route labels `cloudflare.tunnel.hostname` and `cloudflare.tunnel.service` remain required for every managed container.
+> The base route hostname and service are required for every managed container, either as labels or through [default rules](#default-rules).
 >
 > You can define additional routes with suffix-based labels:
 > - `cloudflare.tunnel.hostname.<suffix>`
@@ -247,6 +255,15 @@ All labels are explicit and namespaced. A container is only managed when `cloudf
 > A suffix route is created only when both `hostname.<suffix>` and `service.<suffix>` are set.
 > If one is missing, the controller logs a warning and skips that suffix.
 > Empty suffix labels (for example `cloudflare.tunnel.hostname.`) are ignored.
+
+Multiple hostnames for the same service can be given in one label as a comma/space separated list or as Traefik-style ``Host(`...`)`` rules. Each hostname becomes its own route (and DNS record). Repeating the same label key does **not** work: Docker labels are a map, so the last value wins.
+
+```yaml
+labels:
+  - "cloudflare.tunnel.enable=true"
+  - "cloudflare.tunnel.hostname=git.ywfl.dev,git.yawaflua.tech"
+  - "cloudflare.tunnel.service=http://gitea:3000"
+```
 
 When either origin label is omitted for a managed route, the corresponding `originRequest` key is removed during reconciliation. Unmanaged `originRequest` keys are preserved.
 
@@ -263,6 +280,46 @@ Example:
 ```
 
 `cloudflare.tunnel.dns.zone` selects the Cloudflare zone for a specific hostname. `SYNC_DNS_ZONES` is different: it only keeps whole zones in the cleanup scan set when deleting orphaned DNS records.
+
+### Default rules
+
+Like Traefik's `providers.docker.defaultRule`, the base hostname and service can be derived from templates when the labels are omitted. Explicit labels always win. Containers still need `cloudflare.tunnel.enable=true`.
+
+```yaml
+services:
+  docker-cloudflare-tunnel-sync:
+    environment:
+      SYNC_DEFAULT_HOSTNAME: 'Host(`{{ index .Labels "com.docker.compose.service" }}.dev.example.com`) || Host(`{{ index .Labels "com.docker.compose.service" }}.example.com`)'
+      SYNC_AUTO_SERVICE: "true"
+      # optional, this is the built-in default:
+      SYNC_DEFAULT_SERVICE: 'http://{{ .Name }}:{{ .Port }}'
+
+  app:
+    image: nginx            # EXPOSE 80 in the Dockerfile
+    labels:
+      cloudflare.tunnel.enable: "true"
+    # -> app.dev.example.com and app.example.com -> http://<project>-app-1:80
+```
+
+`SYNC_DEFAULT_HOSTNAME` may render a single hostname, a comma/space separated list, or Traefik-style ``Host(`...`)`` expressions joined with `||`. Every hostname becomes its own route with the same service.
+
+Template fields:
+
+| Field | Description |
+| --- | --- |
+| `.Name` | Container name (resolvable through Docker DNS on shared networks). |
+| `.Service` | `com.docker.compose.service` label, or the container name. |
+| `.Project` | `com.docker.compose.project` label. |
+| `.ID` | Container ID. |
+| `.Labels` | All container labels (`{{ index .Labels "key" }}`). |
+| `.Port` | Service port (service template only): `cloudflare.tunnel.port`, otherwise the lowest exposed TCP port (Dockerfile `EXPOSE`, compose `expose`/`ports`). |
+| `.IP` / `.Network` | Container IP on `cloudflare.tunnel.network`, `SYNC_DOCKER_NETWORK` (compose `<project>_` prefix is tried too), or the first attached network by name. |
+
+Template functions: `lower`, `upper`, `normalize`, `replace OLD NEW S`, `trimPrefix P S`, `trimSuffix X S`.
+
+Service auto-detection is opt-in: without `SYNC_AUTO_SERVICE=true` the `cloudflare.tunnel.service` label stays required.
+
+Use `SYNC_DEFAULT_SERVICE='http://{{ .IP }}:{{ .Port }}'` together with `SYNC_DOCKER_NETWORK` to route by network IP instead of container name. Make sure `cloudflared` is attached to the same network.
 
 ### Access labels
 

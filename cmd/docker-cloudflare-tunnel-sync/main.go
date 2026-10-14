@@ -41,11 +41,32 @@ func main() {
 		os.Exit(1)
 	}
 
-	parser := labels.NewParser()
+	serviceTemplate := ""
+	if cfg.Defaults.AutoService {
+		serviceTemplate = cfg.Defaults.ServiceTemplate
+		if serviceTemplate == "" {
+			serviceTemplate = labels.DefaultServiceTemplate
+		}
+		logger.Info("automatic service detection enabled", "template", serviceTemplate)
+	} else if cfg.Defaults.ServiceTemplate != "" {
+		logger.Warn("SYNC_DEFAULT_SERVICE is ignored because SYNC_AUTO_SERVICE is not enabled")
+	}
+	parser, err := labels.NewParserWithDefaults(labels.Defaults{
+		HostnameTemplate: cfg.Defaults.HostnameTemplate,
+		ServiceTemplate:  serviceTemplate,
+		Network:          cfg.Defaults.Network,
+	})
+	if err != nil {
+		logger.Error("invalid default templates", "error", err)
+		os.Exit(1)
+	}
+	if cfg.Defaults.HostnameTemplate != "" {
+		logger.Info("default hostname template enabled", "template", cfg.Defaults.HostnameTemplate)
+	}
 	reconciler := reconcile.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageTunnel)
 	dnsEngine := dns.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageDNS, cfg.Controller.DeleteDNS, cfg.Controller.DNSZones, cfg.Cloudflare.TunnelID, cfg.ManagedBy)
 	accessEngine := access.NewEngine(cloudflareClient, logger, cfg.Controller.DryRun, cfg.Controller.ManageAccess, cfg.ManagedBy)
-	controller := controller.NewController(dockerAdapter, parser, reconciler, dnsEngine, accessEngine, cfg.Controller.PollInterval, logger)
+	controller := controller.NewController(dockerAdapter, parser, reconciler, dnsEngine, accessEngine, cfg.Controller.PollInterval, cfg.Controller.WatchEvents, cfg.Controller.EventDebounce, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

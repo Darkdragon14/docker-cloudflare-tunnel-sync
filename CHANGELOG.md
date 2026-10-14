@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 This project follows semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- `SYNC_DEFAULT_HOSTNAME`: Traefik-style default hostname template (supports ``Host(`a`) || Host(`b`)``) used when `cloudflare.tunnel.hostname` is missing.
+- `SYNC_AUTO_SERVICE` (opt-in) with `SYNC_DEFAULT_SERVICE` template (default `http://{{ .Name }}:{{ .Port }}`): service is derived from the exposed container port when `cloudflare.tunnel.service` is missing.
+- `SYNC_DOCKER_NETWORK`, `cloudflare.tunnel.port` and `cloudflare.tunnel.network` to control the auto-detected port and network IP.
+
 ## [v1.0.0] - 2026-05-30
 
 First stable release of Docker Cloudflare Tunnel Sync.

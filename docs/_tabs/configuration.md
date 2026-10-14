@@ -4,6 +4,7 @@ icon: fas fa-sliders
 order: 2
 toc: true
 ---
+{% raw %}
 
 Docker Cloudflare Tunnel Sync is configured with environment variables or Docker secrets for sensitive Cloudflare values.
 
@@ -18,6 +19,8 @@ Docker Cloudflare Tunnel Sync is configured with environment variables or Docker
 | `DOCKER_HOST` | no | - | Docker daemon host. Standard Docker environment variable. |
 | `DOCKER_API_VERSION` | no | - | Docker API version override. |
 | `SYNC_POLL_INTERVAL` | no | `30s` | Controller poll interval. |
+| `SYNC_WATCH_EVENTS` | no | `true` | Also sync immediately when Docker reports container `start`/`die`/`destroy` events (works with a read-only socket). Polling keeps running as a fallback. |
+| `SYNC_EVENT_DEBOUNCE` | no | `2s` | Wait this long after the last Docker event before syncing, so a `docker compose up` burst triggers one sync. |
 | `SYNC_RUN_ONCE` | no | `false` | Run a single reconciliation and exit. |
 | `SYNC_DRY_RUN` | no | `false` | Log planned changes without applying them. |
 | `SYNC_MANAGED_TUNNEL` | no | `false` | Allow the controller to overwrite the tunnel ingress configuration. |
@@ -25,6 +28,10 @@ Docker Cloudflare Tunnel Sync is configured with environment variables or Docker
 | `SYNC_MANAGED_DNS` | no | `false` | Allow the controller to create or update DNS CNAME records for tunnel hostnames. |
 | `SYNC_DNS_ZONES` | no | - | Comma-separated DNS zones kept in the orphan cleanup scan when `SYNC_DELETE_DNS=true`. |
 | `SYNC_DELETE_DNS` | no | `false` | Delete managed DNS records in selected zones when they are no longer declared by labels. |
+| `SYNC_DEFAULT_HOSTNAME` | no | - | Go template used as the base hostname when `cloudflare.tunnel.hostname` is missing (like Traefik `defaultRule`). See the Labels Reference. |
+| `SYNC_AUTO_SERVICE` | no | `false` | Derive the base service from the exposed container port when `cloudflare.tunnel.service` is missing. |
+| `SYNC_DEFAULT_SERVICE` | no | `http://{{ .Name }}:{{ .Port }}` | Go template used for the base service when `SYNC_AUTO_SERVICE=true`. |
+| `SYNC_DOCKER_NETWORK` | no | - | Docker network whose container IP is exposed to templates as `{{ .IP }}`. |
 | `SYNC_MANAGED_BY` | no | `docker-cf-tunnel-sync` | Managed-by marker used for DNS comments and Access tags. |
 | `LOG_LEVEL` | no | `info` | Log level: `debug`, `info`, `warn`, or `error`. |
 
@@ -69,3 +76,4 @@ Set the log level with `LOG_LEVEL`:
 ```bash
 -e LOG_LEVEL=debug
 ```
+{% endraw %}

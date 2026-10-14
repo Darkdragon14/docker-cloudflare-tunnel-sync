@@ -21,10 +21,15 @@ type Controller struct {
 	dnsEngine    *dns.Engine
 	accessEngine *access.Engine
 	interval     time.Duration
+	watchEvents  bool
+	debounce     time.Duration
 	log          *slog.Logger
 }
 
-func NewController(dockerAdapter *docker.Adapter, parser *labels.Parser, reconciler *reconcile.Engine, dnsEngine *dns.Engine, accessEngine *access.Engine, interval time.Duration, logger *slog.Logger) *Controller {
+// eventRetryDelay is the wait before reconnecting to the Docker event stream after it fails.
+const eventRetryDelay = 5 * time.Second
+
+func NewController(dockerAdapter *docker.Adapter, parser *labels.Parser, reconciler *reconcile.Engine, dnsEngine *dns.Engine, accessEngine *access.Engine, interval time.Duration, watchEvents bool, debounce time.Duration, logger *slog.Logger) *Controller {
 	return &Controller{
 		docker:       dockerAdapter,
 		parser:       parser,
@@ -32,6 +37,8 @@ func NewController(dockerAdapter *docker.Adapter, parser *labels.Parser, reconci
 		dnsEngine:    dnsEngine,
 		accessEngine: accessEngine,
 		interval:     interval,
+		watchEvents:  watchEvents,
+		debounce:     debounce,
 		log:          logger,
 	}
 }
@@ -47,6 +54,18 @@ func (controller *Controller) Run(ctx context.Context, runOnce bool) error {
 	ticker := time.NewTicker(controller.interval)
 	defer ticker.Stop()
 
+	// Events only signal that a sync is needed; syncs always run on this goroutine so they never overlap.
+	triggers := make(chan struct{}, 1)
+	if controller.watchEvents {
+		go controller.watchDockerEvents(ctx, triggers)
+	}
+
+	debounce := time.NewTimer(controller.debounce)
+	if !debounce.Stop() {
+		<-debounce.C
+	}
+	defer debounce.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -55,6 +74,46 @@ func (controller *Controller) Run(ctx context.Context, runOnce bool) error {
 			if err := controller.syncOnce(ctx); err != nil {
 				controller.log.Error("sync failed", "error", err)
 			}
+		case <-triggers:
+			// Coalesce bursts (e.g. docker compose up recreating several containers) into one sync.
+			debounce.Reset(controller.debounce)
+		case <-debounce.C:
+			controller.log.Info("syncing after Docker container events")
+			if err := controller.syncOnce(ctx); err != nil {
+				controller.log.Error("sync failed", "error", err)
+			}
+			ticker.Reset(controller.interval)
+		}
+	}
+}
+
+// watchDockerEvents forwards container lifecycle events as sync triggers and reconnects on failure.
+func (controller *Controller) watchDockerEvents(ctx context.Context, triggers chan<- struct{}) {
+	for {
+		events, errs := controller.docker.WatchContainerEvents(ctx)
+		controller.log.Info("watching Docker container events")
+		for event := range events {
+			controller.log.Debug("Docker container event", "action", event.Action, "container", event.Name, "id", event.ID)
+			select {
+			case triggers <- struct{}{}:
+			default:
+			}
+		}
+
+		err := <-errs
+		if ctx.Err() != nil {
+			return
+		}
+		controller.log.Warn("Docker event stream stopped; relying on polling until reconnect", "error", err, "retry_in", eventRetryDelay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(eventRetryDelay):
+		}
+		// Events may have been missed while disconnected.
+		select {
+		case triggers <- struct{}{}:
+		default:
 		}
 	}
 }

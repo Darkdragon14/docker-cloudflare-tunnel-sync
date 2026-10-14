@@ -55,6 +55,66 @@ func TestParseContainers(t *testing.T) {
 	}
 }
 
+func TestParseContainersMultipleHostnames(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "a",
+			Name: "git",
+			Labels: map[string]string{
+				LabelEnable:           "true",
+				LabelHost:             "git.ywfl.dev, git.yawaflua.tech",
+				LabelService:          "http://git:3000",
+				LabelHost + ".ssh":    "Host(`ssh.ywfl.dev`) || Host(`ssh.yawaflua.tech`)",
+				LabelService + ".ssh": "ssh://git:22",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+	got := []string{}
+	for _, route := range routes {
+		got = append(got, route.Key.String()+"->"+route.Service)
+	}
+	want := []string{
+		"git.ywfl.dev->http://git:3000",
+		"git.yawaflua.tech->http://git:3000",
+		"ssh.ywfl.dev->ssh://git:22",
+		"ssh.yawaflua.tech->ssh://git:22",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected routes %v, got %v", want, got)
+	}
+}
+
+func TestParseContainersInvalidHostnameList(t *testing.T) {
+	parser := NewParser()
+
+	containers := []docker.ContainerInfo{
+		{
+			ID:   "a",
+			Name: "bad",
+			Labels: map[string]string{
+				LabelEnable:  "true",
+				LabelHost:    "ok.example.com,bad.example.com/path",
+				LabelService: "http://bad",
+			},
+		},
+	}
+
+	routes, errs := parser.ParseContainers(containers)
+	if len(routes) != 0 {
+		t.Fatalf("expected no routes, got %v", routes)
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "invalid hostname") {
+		t.Fatalf("expected invalid hostname error, got %v", errs)
+	}
+}
+
 func TestParseContainersWithOriginLabels(t *testing.T) {
 	parser := NewParser()
 

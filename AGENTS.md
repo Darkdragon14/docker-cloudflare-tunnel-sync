@@ -15,7 +15,7 @@
   - **Label parser**: validates Cloudflare-specific labels and produces desired ingress and Access definitions.
   - **Cloudflare API client**: reads and updates tunnel configurations plus Access apps/policies and DNS records.
   - **Reconciliation engines**: compare desired vs actual state for ingress, Access, and DNS.
-  - **Controller loop**: polls Docker at a fixed interval and triggers reconciliation.
+  - **Controller loop**: polls Docker at a fixed interval and also syncs (debounced) on Docker container start/die/destroy events when `SYNC_WATCH_EVENTS=true` (default).
 - Project structure:
   ```
   cmd/docker-cloudflare-tunnel-sync/
@@ -59,5 +59,4 @@
   - Require `SYNC_MANAGED_ACCESS=true` to allow Access app/policy updates.
   - Require `SYNC_MANAGED_DNS=true` to allow DNS record updates.
 - Next steps:
-  - Add Docker event-based watching for faster convergence.
   - Add first-class Kubernetes provider while reusing the reconciliation engine.
